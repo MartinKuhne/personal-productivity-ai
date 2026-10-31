@@ -3,8 +3,11 @@
 use super::*;
 use crate::binding::GestureStart;
 use crate::surface::zorder::ZBand;
+use crate::test_helpers::Capture;
 use crate::test_helpers::Harness;
+use crate::test_helpers::assert_repainted;
 use crate::test_helpers::headless_renderer;
+use crate::test_helpers::moved;
 use crate::token::color::Palette;
 use crate::token::contrast::contrast_ratio;
 use iced::Event;
@@ -1263,4 +1266,334 @@ fn test_operate_forwards_focusables_only_while_open() {
             "[{label}] the sheet must forward focus registration to its body"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 7. The footer element, the body overlay, and what the paint pass draws
+// ---------------------------------------------------------------------------
+
+impl SheetDriver<'_> {
+    /// Ask the sheet whether its body hands a floating layer up to the runtime.
+    fn body_has_overlay(&mut self) -> bool {
+        let Self {
+            widget,
+            tree,
+            renderer,
+            node,
+            offset,
+            bounds,
+            ..
+        } = self;
+
+        let layout = Layout::with_offset(*offset, node);
+        widget
+            .overlay(tree, layout, renderer, bounds, Vector::new(0.0, 0.0))
+            .is_some()
+    }
+}
+
+/// A body that owns a floating layer, the way a tooltip or an open menu inside
+/// the drawer does.
+struct Overlaying;
+
+impl Widget<TestMsg, iced::Theme, iced::Renderer> for Overlaying {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.max())
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        _tree: &'b mut Tree,
+        _layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        _viewport: &Rectangle,
+        _translation: Vector,
+    ) -> Option<iced::advanced::overlay::Element<'b, TestMsg, iced::Theme, iced::Renderer>> {
+        Some(iced::advanced::overlay::Element::new(Box::new(
+            BodyFloatingLayer,
+        )))
+    }
+}
+
+impl From<Overlaying> for Element<'_, TestMsg, iced::Theme, iced::Renderer> {
+    fn from(widget: Overlaying) -> Self {
+        Element::new(widget)
+    }
+}
+
+/// The floating layer [`Overlaying`] hands up.
+struct BodyFloatingLayer;
+
+impl iced::advanced::overlay::Overlay<TestMsg, iced::Theme, iced::Renderer> for BodyFloatingLayer {
+    fn layout(&mut self, _renderer: &iced::Renderer, _bounds: Size) -> layout::Node {
+        layout::Node::new(Size::new(64.0, 24.0))
+    }
+
+    fn draw(
+        &self,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+    ) {
+    }
+}
+
+/// A footed sheet driven through the real widget entry points.
+fn footed_driver() -> SheetDriver<'static> {
+    let model = SideSheetModel::new("Footed").with_placement(SheetPlacement::Right);
+    let sheet = SheetDriver::wired(side_sheet(model, Probe).footer(Probe));
+    SheetDriver::build(sheet, Vector::new(600.0, 20.0))
+}
+
+/// A point inside the footer band and below the body element's own box.
+fn footer_point(driver: &SheetDriver<'_>) -> Point {
+    Point::new(
+        driver.bounds.x + space::MD + 40.0,
+        driver.bounds.y + driver.bounds.height - FOOTER_HEIGHT / 2.0,
+    )
+}
+
+#[test]
+fn a_press_in_the_footer_band_belongs_to_the_footer_element() {
+    let mut driver = footed_driver();
+    let in_footer = footer_point(&driver);
+
+    driver.press(in_footer);
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ContentPressed],
+        "the footer must receive the press, and the body must not claim a point outside its own box"
+    );
+}
+
+#[test]
+fn the_footer_offers_its_own_cursor() {
+    let driver = footed_driver();
+    assert_eq!(
+        driver.interaction(footer_point(&driver)),
+        mouse::Interaction::Grabbing,
+        "the footer's own cursor must reach the runtime through the sheet"
+    );
+}
+
+#[test]
+fn the_footer_registers_its_own_focus_stop() {
+    let model = SideSheetModel::new("Footed");
+    let mut harness = Harness::<(), _>::headless(move || {
+        side_sheet(model.clone(), iced::widget::text_input("Body", "b"))
+            .footer(iced::widget::text_input("Footer", "f"))
+            .into()
+    });
+    assert_eq!(
+        harness.focus_count().total,
+        2,
+        "an open sheet must forward focus registration to its footer as well as its body"
+    );
+}
+
+#[test]
+fn an_open_drag_freezes_the_hover_flags() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector"));
+    assert!(driver.press(driver.grab_point()));
+
+    let close = driver.close_point();
+    assert!(
+        driver.hover(close),
+        "a move during an open drag is claimed by the drag"
+    );
+    assert!(
+        !driver.state().is_hovered_close,
+        "the drag owns the pointer, so the close button must not light up under it"
+    );
+    assert!(
+        !driver.state().is_hovered_pin,
+        "nor may the pin button borrow a pointer the drag is holding"
+    );
+}
+
+#[test]
+fn a_drag_without_resize_callbacks_is_claimed_but_silent() {
+    let mut driver = SheetDriver::build(
+        side_sheet(SideSheetModel::new("Unwired"), Probe),
+        Vector::new(600.0, 20.0),
+    );
+    let start = driver.grab_point();
+
+    assert!(
+        driver.press(start),
+        "the sheet owns the edge press whether or not the host is listening"
+    );
+    assert!(
+        driver.hover(Point::new(start.x - 30.0, start.y)),
+        "a live tick is claimed while the drag is open"
+    );
+    assert!(
+        driver.release(Point::new(start.x - 30.0, start.y)),
+        "the release is claimed too"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "no callback means no message, not a message invented from nothing"
+    );
+
+    assert!(driver.press(start));
+    assert!(driver.hover(Point::new(start.x - 30.0, start.y)));
+    assert!(
+        driver.key(Named::Escape),
+        "Escape still belongs to the open drag"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "the revert is reported only to a host that asked for it"
+    );
+    assert!(
+        !driver.state().resize.is_active(),
+        "Escape closes the slot even with no callback attached"
+    );
+}
+
+#[test]
+fn an_open_sheet_forwards_its_body_overlay() {
+    let mut driver = SheetDriver::build(
+        side_sheet(SideSheetModel::new("Floating"), Overlaying),
+        Vector::new(600.0, 20.0),
+    );
+    assert!(
+        driver.body_has_overlay(),
+        "a menu or tooltip owned by the drawer's body must still escape the drawer's bounds"
+    );
+
+    let mut plain = SheetDriver::build(
+        side_sheet(SideSheetModel::new("Plain"), Probe),
+        Vector::new(600.0, 20.0),
+    );
+    assert!(
+        !plain.body_has_overlay(),
+        "a body with nothing floating hands up nothing"
+    );
+}
+
+#[test]
+fn a_closed_sheet_exposes_no_overlay() {
+    let mut driver = SheetDriver::build(
+        side_sheet(SideSheetModel::new("Closed").with_open(false), Overlaying),
+        Vector::new(600.0, 20.0),
+    );
+    assert!(
+        !driver.body_has_overlay(),
+        "a hidden drawer must not leave its floating layer on screen"
+    );
+}
+
+#[test]
+fn the_header_buttons_and_edge_divider_paint_only_under_the_pointer() {
+    let viewport = Size::new(360.0, 300.0);
+    let model = SideSheetModel::new("Inspector").with_width(360.0);
+    let button_y = (HEADER_HEIGHT - HEADER_BUTTON_SIZE) / 2.0;
+    let pin_rect = Rectangle::new(
+        Point::new(
+            viewport.width - space::MD - HEADER_BUTTON_SIZE * 2.0 - space::XS,
+            button_y,
+        ),
+        Size::new(HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE),
+    );
+    let close_rect = Rectangle::new(
+        Point::new(viewport.width - space::MD - HEADER_BUTTON_SIZE, button_y),
+        Size::new(HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE),
+    );
+    let divider = Rectangle::new(Point::new(0.0, 100.0), Size::new(1.0, 20.0));
+    let footer_line = Rectangle::new(
+        Point::new(100.0, viewport.height - FOOTER_HEIGHT),
+        Size::new(100.0, 1.0),
+    );
+    let grab_at = Point::new(GRAB_WIDTH / 2.0 - 1.0, 150.0);
+
+    let mut capture = Capture::new();
+
+    let rest_root: Element<'_, TestMsg> = side_sheet(model.clone(), Probe).into();
+    let rest = capture.frame(viewport, rest_root);
+
+    let pin_root: Element<'_, TestMsg> = side_sheet(model.clone(), Probe).into();
+    let pin_hover = capture.frame_after_at(
+        viewport,
+        pin_root,
+        &[moved(pin_rect.center())],
+        mouse::Cursor::Available(pin_rect.center()),
+    );
+    assert_repainted(&rest, &pin_hover, pin_rect, "the pin button hover fill");
+    assert_eq!(
+        rest.differing_pixels(&pin_hover, close_rect),
+        0,
+        "hovering the pin button must not light the close button"
+    );
+
+    let close_root: Element<'_, TestMsg> = side_sheet(model.clone(), Probe).into();
+    let close_hover = capture.frame_after_at(
+        viewport,
+        close_root,
+        &[moved(close_rect.center())],
+        mouse::Cursor::Available(close_rect.center()),
+    );
+    assert_repainted(
+        &rest,
+        &close_hover,
+        close_rect,
+        "the close button hover fill",
+    );
+    assert_eq!(
+        rest.differing_pixels(&close_hover, pin_rect),
+        0,
+        "hovering the close button must not light the pin button"
+    );
+
+    let grab_root: Element<'_, TestMsg> = side_sheet(model.clone(), Probe).into();
+    let grab_hover = capture.frame_after_at(
+        viewport,
+        grab_root,
+        &[moved(grab_at)],
+        mouse::Cursor::Available(grab_at),
+    );
+    assert_repainted(
+        &rest,
+        &grab_hover,
+        divider,
+        "the edge divider promoted to accent.border",
+    );
+    assert_eq!(
+        rest.differing_pixels(&grab_hover, pin_rect),
+        0,
+        "hovering the edge must not light a header button"
+    );
+
+    let footed_root: Element<'_, TestMsg> = side_sheet(model.clone(), Probe).footer(Probe).into();
+    let footed = capture.frame(viewport, footed_root);
+    assert_repainted(
+        &rest,
+        &footed,
+        footer_line,
+        "the footer's own top divider line",
+    );
 }

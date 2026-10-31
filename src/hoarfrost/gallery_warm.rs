@@ -13,6 +13,8 @@
 //! Every cell is painted at the **arrival instant itself**, one frame before any
 //! wait could have elapsed. That is the honest probe point: a cell that showed
 //! the state 400 ms later would look identical whichever verdict applied.
+//!
+//! Unit tests live in the sibling `gallery_warm_tests.rs` sidecar.
 
 use crate::gallery::{
     AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, paint_frame, surface_layer,

@@ -1186,3 +1186,56 @@ fn current_tag_paths_skips_missing_roots_and_lists_each_file_once() {
         "overlapping libraries contribute each file once"
     );
 }
+
+/// Dropping the last file-bus handle closes the stream, which must end the
+/// consumer loop and join the parsing workers instead of spinning forever.
+#[test]
+fn consumer_stops_when_the_file_bus_closes() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("note.md");
+    std::fs::write(&path, "---\ntags: [one]\n---\nbody").unwrap();
+
+    let file_bus = Bus::new();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let sender = BackgroundEventSender::new(event_tx);
+    let mut results = sender.subscribe();
+    let manager = TagManager::new(file_bus.clone(), sender, AppConfig::default()).spawn();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while file_bus.subscriber_count() == 0 && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        file_bus.subscriber_count(),
+        1,
+        "precondition: the tag manager must be subscribed"
+    );
+
+    file_bus.publish(FileChanged::discovered_one(path.clone()));
+    assert!(
+        manager.flush(),
+        "flush must succeed while the file bus is open"
+    );
+    let event = results
+        .try_recv()
+        .expect("the tag result must be delivered before the bus closes");
+    assert!(
+        matches!(event, BackgroundEvent::Fs(FsEvent::FileParsed { .. })),
+        "unexpected event: {event:?}"
+    );
+
+    // `spawn` drops its own bus handle, so this is the last sender: the
+    // consumer's next `recv()` reports a closed stream.
+    drop(file_bus);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut still_serving = manager.flush();
+    while still_serving && Instant::now() < deadline {
+        std::thread::yield_now();
+        still_serving = manager.flush();
+    }
+    assert!(
+        !still_serving,
+        "the consumer must stop serving flush requests once the file bus is closed"
+    );
+}

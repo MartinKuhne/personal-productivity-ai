@@ -1290,3 +1290,57 @@ fn inverted_editor_palette_delegates_to_the_framework_token() {
     assert_eq!(app.text, pro.text);
     assert_eq!(app.error, pro.error);
 }
+
+/// A focus recovery that cannot name a line still has to offer an action: the
+/// button falls back to the generic "Fix" rather than going blank.
+#[test]
+fn recovery_label_falls_back_to_fix_when_a_focus_error_has_no_location() {
+    let no_location = ModalError::new("X", "x").with_recovery(Recovery::FocusControl(
+        hoarfrost::focus::FocusId::new(EDITOR_TEXT_ID),
+    ));
+
+    assert_eq!(
+        recovery_label(&no_location),
+        strings::EDITOR_FIX_LABEL,
+        "a `FocusControl` recovery with no `ErrorLocation` must still name an action, \
+         not fall through to nothing"
+    );
+}
+
+/// The hand-written `Debug` impl is the only dump an open buffer gets. It
+/// reports the editing surface by **length** rather than by value and names the
+/// file being edited, which is what makes a dump identifiable.
+#[test]
+fn debug_dump_reports_the_buffer_length_and_the_opened_path() {
+    const BODY: &str = "the whole body of the user's note, verbatim";
+    let vm = open_vm(BODY);
+
+    let dump = format!("{vm:?}");
+    assert!(
+        dump.starts_with("EditorViewModel {"),
+        "the dump must identify the struct it describes, got {dump}"
+    );
+    for field in [
+        "path",
+        "text_len",
+        "front_matter",
+        "line",
+        "column",
+        "validation_error",
+        "save_error",
+        "history",
+    ] {
+        assert!(
+            dump.contains(field),
+            "the card reads every one of these, so the dump must report `{field}`, got {dump}"
+        );
+    }
+    assert!(
+        dump.contains(&format!("text_len: {}", BODY.len())),
+        "the editing surface is reported by length rather than by value, got {dump}"
+    );
+    assert!(
+        dump.contains("note.md"),
+        "a dump that cannot say which file is open cannot be acted on, got {dump}"
+    );
+}

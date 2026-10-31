@@ -1945,3 +1945,163 @@ fn radio_rest_and_hover<'a, 'm: 'a>(
 
     (rest, hovered, boxes)
 }
+
+// ===========================================================================
+// The read-outs a host uses to address the control
+//
+// `display_text` is the one string layout, paint and identity all agree on,
+// and `focus_id`/`widget_id` are how the router finds the control at all.
+// Both are pure, so these cases need no renderer.
+// ===========================================================================
+
+#[test]
+fn test_the_switch_caption_carries_the_position_text_in_every_combination() {
+    // -- label and position text together
+    let on = ToggleSwitch::<TestMsg>::standalone("Sync", true, "sw_dt_on", |_| None)
+        .with_texts("Enabled", "Disabled");
+    assert_eq!(
+        on.display_text(),
+        "Sync (Enabled)",
+        "an on switch holding both strings paints the label with its position text beside it"
+    );
+
+    let off = ToggleSwitch::<TestMsg>::standalone("Sync", false, "sw_dt_off", |_| None)
+        .with_texts("Enabled", "Disabled");
+    assert_eq!(
+        off.display_text(),
+        "Sync (Disabled)",
+        "the same switch in the other position carries the off text instead"
+    );
+
+    // -- label alone
+    let label_only = ToggleSwitch::<TestMsg>::standalone("Sync", true, "sw_dt_label", |_| None);
+    assert_eq!(
+        label_only.state_text(),
+        None,
+        "a switch built without position text has none to carry"
+    );
+    assert_eq!(
+        label_only.display_text(),
+        "Sync",
+        "and the caption is the label with no parentheses hanging off it"
+    );
+
+    // -- position text alone
+    let aux_only = ToggleSwitch::<TestMsg>::standalone("", true, "sw_dt_aux", |_| None)
+        .with_texts("Enabled", "Disabled");
+    assert_eq!(
+        aux_only.display_text(),
+        "Enabled",
+        "a label-less switch paints the position text on its own, without a leading space"
+    );
+
+    // -- neither
+    let blank = ToggleSwitch::<TestMsg>::standalone("", false, "sw_dt_blank", |_| None);
+    assert_eq!(
+        blank.display_text(),
+        "",
+        "a switch with neither string has no caption at all"
+    );
+}
+
+#[test]
+fn test_a_controlled_switch_prefers_the_position_text_its_model_names() {
+    // The model names its own position text, so that is what the caption shows.
+    let model = SwitchModel::new("Bluetooth")
+        .with_on(true)
+        .with_texts("Linked", "Unlinked");
+    let switch =
+        ToggleSwitch::<TestMsg>::controlled(Controlled::new(&model), "sw_dt_model", |commit| {
+            Some(TestMsg::Switched(commit.into_value()))
+        })
+        .with_texts("Builder On", "Builder Off");
+
+    assert_eq!(
+        switch.state_text(),
+        Some("Linked"),
+        "the model's own on text wins over the one the builder was handed"
+    );
+    assert_eq!(
+        switch.display_text(),
+        "Bluetooth (Linked)",
+        "and the caption is built from the winner, not the loser"
+    );
+
+    // A model that names no position text leaves the builder's strings in charge.
+    let bare = SwitchModel::new("Sync").with_on(false);
+    let fallback =
+        ToggleSwitch::<TestMsg>::controlled(Controlled::new(&bare), "sw_dt_fall", |commit| {
+            Some(TestMsg::Switched(commit.into_value()))
+        })
+        .with_texts("Builder On", "Builder Off");
+
+    assert_eq!(
+        fallback.state_text(),
+        Some("Builder Off"),
+        "a model with no position text falls back to the builder's off text"
+    );
+    assert_eq!(
+        fallback.display_text(),
+        "Sync (Builder Off)",
+        "and the caption follows the fallback rather than coming out bare"
+    );
+}
+
+#[test]
+fn test_each_toggle_widget_answers_to_the_focus_id_it_was_given() {
+    let checkbox =
+        Checkbox::<TestMsg>::standalone("Agree", CheckState::Unchecked, "id_cb", |_| None);
+    assert_eq!(
+        checkbox.focus_id(),
+        &FocusId::new("id_cb"),
+        "a checkbox reports the focusable it was built for"
+    );
+    assert_eq!(
+        checkbox.label_text(),
+        "Agree",
+        "and the caption it was handed"
+    );
+
+    let switch = ToggleSwitch::<TestMsg>::standalone("Sync", false, "id_sw", |_| None);
+    assert_eq!(
+        switch.focus_id(),
+        &FocusId::new("id_sw"),
+        "a switch reports the focusable it was built for"
+    );
+
+    let model = radio_model("a");
+    let group = RadioGroup::<TestMsg, &str>::controlled(Controlled::new(&model), "id_rg", |_| None);
+    assert_eq!(
+        group.focus_id(),
+        &FocusId::new("id_rg"),
+        "and so does a radio group"
+    );
+}
+
+#[test]
+fn test_a_rebuilt_toggle_claims_the_identity_its_focus_key_already_had() {
+    let first =
+        Checkbox::<TestMsg>::standalone("Agree", CheckState::Unchecked, "id_shared", |_| None);
+    let rebuilt =
+        Checkbox::<TestMsg>::standalone("Other", CheckState::Checked, "id_shared", |_| None);
+    assert_eq!(
+        first.widget_id(),
+        rebuilt.widget_id(),
+        "a rebuilt checkbox claims the registration identity its focus key already had"
+    );
+
+    let neighbour =
+        Checkbox::<TestMsg>::standalone("Agree", CheckState::Unchecked, "id_other", |_| None);
+    assert_ne!(
+        first.widget_id(),
+        neighbour.widget_id(),
+        "two checkboxes on one screen must not be addressed by one identity"
+    );
+
+    let switch = ToggleSwitch::<TestMsg>::standalone("Sync", false, "id_shared", |_| None);
+    assert_eq!(
+        switch.widget_id(),
+        first.widget_id(),
+        "the registration identity is the focus key and nothing else, whichever toggle carries it"
+    );
+}

@@ -1868,3 +1868,306 @@ fn test_refresh_context_rects_moves_an_open_card_with_the_viewport() {
         );
     }
 }
+// -------------------------------------------------------------------
+//  batch_run_status: the Dialogs -> view-model projection
+// -------------------------------------------------------------------
+
+use crate::agent::batch::types::{BatchHandle, BatchResult};
+
+/// A batch result with no work recorded, so a `BatchHandle` can be built
+/// without running a real batch session ([RUST-006]: no LLM, no files).
+fn idle_batch_result() -> BatchResult {
+    BatchResult {
+        total_jobs: 0,
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        duration: std::time::Duration::ZERO,
+    }
+}
+
+/// A handle whose worker is parked on a channel the test still holds open, so
+/// `is_finished()` is guaranteed to be false for as long as the test runs.
+/// Dropping the returned gate lets the worker terminate.
+fn running_batch_handle() -> (BatchHandle, std::sync::mpsc::Sender<()>) {
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+    let thread = std::thread::spawn(move || {
+        let _ = gate_rx.recv();
+        idle_batch_result()
+    });
+    (
+        BatchHandle {
+            thread,
+            cancel_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        },
+        gate_tx,
+    )
+}
+
+/// A handle whose worker has provably terminated: the helper waits on the very
+/// predicate the tests assert on, so `is_finished()` cannot report anything but
+/// `true` afterwards. `join` is not an option here — it consumes the
+/// `JoinHandle` that the returned [`BatchHandle`] has to own.
+fn finished_batch_handle() -> BatchHandle {
+    let handle = BatchHandle {
+        thread: std::thread::spawn(idle_batch_result),
+        cancel_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let mut spins = 0_u32;
+    while !handle.thread.is_finished() {
+        std::thread::yield_now();
+        spins += 1;
+        assert!(spins < 1_000_000, "the idle worker must run to completion");
+    }
+    handle
+}
+
+/// No batch was ever started: neither a handle nor a cancel flag exists, so
+/// the card must render the idle form.
+#[test]
+fn batch_run_status_is_idle_when_no_batch_ever_ran() {
+    let status = batch_run_status(&crate::ui::Dialogs::default());
+
+    assert_eq!(
+        status,
+        BatchRunStatus::default(),
+        "an untouched Dialogs must project as idle"
+    );
+    assert!(
+        !status.has_handle && !status.finished && !status.cancel_requested,
+        "idle means no handle, nothing finished and no cancellation, got {status:?}"
+    );
+}
+
+/// A cancel flag that exists but was never raised is *not* a cancellation
+/// request — the flag's value decides, not its presence.
+#[test]
+fn batch_run_status_reads_the_cancel_flag_value_not_its_presence() {
+    let clear = crate::ui::Dialogs {
+        batch_cancel_flag: Some(Arc::new(std::sync::atomic::AtomicBool::new(false))),
+        ..crate::ui::Dialogs::default()
+    };
+    let raised = crate::ui::Dialogs {
+        batch_cancel_flag: Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        ..crate::ui::Dialogs::default()
+    };
+
+    let clear_status = batch_run_status(&clear);
+    assert!(
+        !clear_status.cancel_requested,
+        "a flag that was never raised must not read as a cancellation"
+    );
+    assert!(
+        !clear_status.has_handle,
+        "a cancel flag on its own is not a running batch"
+    );
+
+    let raised_status = batch_run_status(&raised);
+    assert!(
+        raised_status.cancel_requested,
+        "a raised flag must reach the card, got {raised_status:?}"
+    );
+    assert!(
+        !raised_status.has_handle && !raised_status.finished,
+        "cancellation is independent of the handle's own state, got {raised_status:?}"
+    );
+}
+
+/// A worker that is still running reports a handle without the finished bit —
+/// the card must keep the progress view rather than the result summary.
+#[test]
+fn batch_run_status_marks_a_live_worker_as_unfinished() {
+    let (handle, gate) = running_batch_handle();
+    let dialogs = crate::ui::Dialogs {
+        batch_handle: Some(handle),
+        ..crate::ui::Dialogs::default()
+    };
+
+    let status = batch_run_status(&dialogs);
+    assert!(
+        status.has_handle,
+        "a live handle must switch the card to the progress view"
+    );
+    assert!(
+        !status.finished,
+        "a worker parked on its gate must not read as finished, got {status:?}"
+    );
+
+    drop(gate);
+}
+
+/// A worker that has terminated reports both bits, which is what lets the card
+/// offer the results view and stop polling the handle.
+#[test]
+fn batch_run_status_marks_a_terminated_worker_as_finished() {
+    let dialogs = crate::ui::Dialogs {
+        batch_handle: Some(finished_batch_handle()),
+        ..crate::ui::Dialogs::default()
+    };
+
+    let status = batch_run_status(&dialogs);
+    assert!(
+        status.has_handle && status.finished,
+        "a joined worker must report a handle that is finished, got {status:?}"
+    );
+    assert!(
+        !status.cancel_requested,
+        "a worker that ran to completion carries no cancellation, got {status:?}"
+    );
+}
+
+/// A cancelled batch that has also terminated raises all three bits at once —
+/// the projection must not let one field mask another.
+#[test]
+fn batch_run_status_reports_a_finished_and_cancelled_batch() {
+    let handle = finished_batch_handle();
+    handle
+        .cancel_flag
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let dialogs = crate::ui::Dialogs {
+        batch_cancel_flag: Some(handle.cancel_flag.clone()),
+        batch_handle: Some(handle),
+        ..crate::ui::Dialogs::default()
+    };
+
+    let status = batch_run_status(&dialogs);
+    assert_eq!(
+        status,
+        BatchRunStatus {
+            has_handle: true,
+            finished: true,
+            cancel_requested: true,
+        },
+        "a cancelled, terminated batch must raise every bit"
+    );
+}
+
+// --- The hand-written `Debug` dump -----------------------------------------
+
+/// `AppState` cannot derive `Debug` (the orchestrator is not `Debug`), so the
+/// hand-written impl is the only dump anyone gets. It has to report the
+/// iced-runtime state and name the domain halves opaquely — anything else
+/// either would not compile or would drag document state into a log line.
+#[test]
+fn test_app_state_debug_names_the_runtime_bits_and_keeps_the_domain_opaque() {
+    let state = fresh_state(populated_persisted());
+    let dump = format!("{state:?}");
+
+    assert!(
+        dump.starts_with("AppState {"),
+        "the dump must identify the struct it describes, got {dump}"
+    );
+    for opaque in ["<FastMdApp>", "<BusReceivers>", "<dyn UiStateStorage>"] {
+        assert!(
+            dump.contains(opaque),
+            "the non-`Debug` domain halves must be named opaquely as {opaque}, got {dump}"
+        );
+    }
+    for field in ["os_scale", "viewport", "panes", "band", "models", "overlay"] {
+        assert!(
+            dump.contains(field),
+            "the runtime state must be reported under the field `{field}`, got {dump}"
+        );
+    }
+}
+
+// --- The escape walk's catch-all -------------------------------------------
+
+/// A registered surface the reducer holds no field for must not eat the key.
+///
+/// `sync_surfaces` is the only writer of the index, so such an id means the two
+/// halves are wired wrong. The walk's catch-all answers `CannotUnwind` and keeps
+/// travelling — it must not report a close it did not perform, and must not
+/// unregister the ghost it just refused to close.
+#[test]
+fn test_close_topmost_passes_the_key_through_a_surface_it_has_no_field_for() {
+    let mut overlay = OverlayState::default();
+    let _ = overlay.surfaces.register(
+        SurfaceId::new("overlay.unknown"),
+        SurfaceKind::Modal,
+        Vec::new(),
+    );
+
+    assert_eq!(
+        overlay.close_topmost(),
+        None,
+        "a surface with no app-side field must decline the key, not claim a close"
+    );
+    assert_eq!(
+        overlay.surfaces.surfaces().len(),
+        1,
+        "declining must leave the registration in place for the next frame to diagnose"
+    );
+}
+
+// --- `ContextMenu::row_message` refusals ------------------------------------
+
+/// `row_message` is read **before** the row activates, so a card or row the menu
+/// does not actually hold must answer `None` rather than guess at an intent.
+#[test]
+fn test_row_message_answers_none_for_a_card_or_row_the_menu_does_not_hold() {
+    let mut overlay = OverlayState::default();
+    open_context_menu(&mut overlay);
+    let menu = overlay
+        .context_menu
+        .as_ref()
+        .expect("the fixture opens a real card");
+
+    let root = crate::ui_iced::context_menu::root_id(
+        &crate::ui_iced::context_menu::ContextTarget::TreeFile {
+            path: PathBuf::from("M:\\lib\\note.md"),
+        },
+    );
+    assert!(
+        menu.row_message(&root, 0).is_some(),
+        "row 0 of the live card carries an intent — without this the two refusals \
+         below could pass for the wrong reason"
+    );
+
+    let unknown = hoarfrost::surface::menu::model::MenuId::new("context.file./nowhere");
+    assert!(
+        menu.row_message(&unknown, 0).is_none(),
+        "a card the cascade does not hold can have no intent to report"
+    );
+    assert!(
+        menu.row_message(&root, 4096).is_none(),
+        "a row index past the end of the card can have no intent to report"
+    );
+}
+
+// --- `boot_with_persisted` --------------------------------------------------
+
+/// `boot_with_persisted` exists so `launch` can read the snapshot **once** and
+/// hand the same one to the window settings and the boot closure. It must
+/// therefore use the snapshot it is given rather than re-reading storage — the
+/// storage here is deliberately empty, so anything the state shows came from
+/// the argument.
+#[test]
+fn test_boot_with_persisted_uses_the_supplied_snapshot_rather_than_re_reading_storage() {
+    let (state, _task) = boot_with_persisted(
+        LaunchInputs {
+            config: marker_config(),
+            config_bus: Bus::<ConfigArrived>::new(),
+            config_storage: Arc::new(InMemoryConfigStorage::new()),
+            ui_state_storage: Arc::new(InMemoryUiStateStorage::new()),
+            args: vec!["fastmd_iced".to_string()],
+        },
+        populated_persisted(),
+    );
+
+    assert_eq!(
+        state.viewport,
+        Size::new(998.0, 688.0),
+        "the supplied window size must be the one the state boots with"
+    );
+    assert_eq!(
+        state.app.layout().left_panel_width,
+        Some(280.0),
+        "the supplied panel widths must survive into the domain layout"
+    );
+    assert_eq!(
+        state.requested_scale_factor(),
+        1.25,
+        "the supplied scale multiplier must survive into the scale request"
+    );
+}

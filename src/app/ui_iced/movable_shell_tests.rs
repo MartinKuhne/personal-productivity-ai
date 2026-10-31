@@ -258,3 +258,67 @@ fn dock_action_stays_legal_because_it_is_a_labelled_button() {
          content size"
     );
 }
+
+/// The shell's contract is that it paints **the card only**, sized to the host's
+/// own geometry, so [`movable_layer`](crate::ui_iced::overlay::movable_layer)
+/// can place it without a second source of size. Laid out headlessly, the card
+/// container must therefore come out at exactly the host's size, and the content
+/// band the caller handed in must be mounted inside it rather than dropped.
+#[test]
+fn the_shell_is_sized_to_the_host_geometry_and_mounts_its_content() {
+    use crate::ui_iced::message::Message;
+    use crate::ui_iced::movable_shell::movable_shell;
+    use iced::widget::{Row, container, text};
+
+    /// Id of the content element handed to the shell, so the layout can be
+    /// measured through it.
+    const CONTENT_MARKER_ID: &str = "test.movable.content_marker";
+    const CARD_WIDTH: f32 = 680.0;
+    const CARD_HEIGHT: f32 = 440.0;
+
+    let host = host(CARD_WIDTH, CARD_HEIGHT, viewport());
+    let shell = movable_shell(
+        &host,
+        MovableCard::AgentDebug,
+        Row::new().push(text("controls")),
+        container(text("content band"))
+            .id(iced::widget::Id::from(CONTENT_MARKER_ID))
+            .into(),
+        text("3 entries").into(),
+    );
+
+    let mut sim: iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer> =
+        iced_test::simulator(shell);
+
+    let card = sim
+        .find(content_viewport_id(MovableCard::AgentDebug))
+        .expect("the shell's own container carries the card's viewport id")
+        .bounds();
+    assert!(
+        (card.width - CARD_WIDTH).abs() < 0.5,
+        "the card must be as wide as the host's geometry ({CARD_WIDTH}), got {}",
+        card.width
+    );
+    assert!(
+        (card.height - CARD_HEIGHT).abs() < 0.5,
+        "the card must be as tall as the host's geometry ({CARD_HEIGHT}), got {}",
+        card.height
+    );
+
+    let content = sim
+        .find(iced::widget::Id::from(CONTENT_MARKER_ID))
+        .expect("the content element the caller handed in must be mounted")
+        .bounds();
+    assert!(
+        content.height > 0.0,
+        "the content band takes the leftover height and must not collapse, got {content:?}"
+    );
+    assert!(
+        content.x >= card.x
+            && content.y >= card.y
+            && content.x + content.width <= card.x + card.width + 1e-3
+            && content.y + content.height <= card.y + card.height + 1e-3,
+        "the content band must sit inside the card it was handed to, got content \
+         {content:?} inside card {card:?}"
+    );
+}

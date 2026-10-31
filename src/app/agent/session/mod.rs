@@ -21,6 +21,7 @@
 //! every operation returns [`SessionError::Disabled`]. The
 //! `playwright-rs` dependency is only pulled in when the
 //! `browser` feature is enabled.
+//! Unit tests live in the sibling `browser_tests.rs` sidecar.
 
 pub(crate) mod browser_session;
 pub mod bus_observer;

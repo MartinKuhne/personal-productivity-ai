@@ -690,3 +690,299 @@ fn the_host_holds_its_control_identity() {
     let (host, _focus) = pair();
     assert_eq!(host.control(), &control());
 }
+// ---------------------------------------------------------------------------
+// 6 — the emission's own value semantics, and the paths groups 1-5 never walked
+// ---------------------------------------------------------------------------
+
+#[test]
+fn combo_emissions_compare_within_their_own_tier_only() {
+    let open = ComboEmission::<String>::OpenChanged(true);
+    let filter = ComboEmission::<String>::FilterChanged(Live::new("wo".to_string()));
+    let commit = ComboEmission::<String>::Committed(Commit::new("wrap".to_string()));
+    let cancel = ComboEmission::<String>::Cancelled(Cancel::new(ComboSnapshot::new(
+        Some("wrap".to_string()),
+        None,
+    )));
+
+    assert_eq!(
+        open,
+        ComboEmission::OpenChanged(true),
+        "two reports of the same flyout opening are one report"
+    );
+    assert_ne!(
+        open,
+        ComboEmission::OpenChanged(false),
+        "opening and closing are different reports"
+    );
+    assert_eq!(
+        filter,
+        ComboEmission::FilterChanged(Live::new("wo".to_string())),
+        "the same query typed twice is one tick"
+    );
+    assert_ne!(
+        filter,
+        ComboEmission::FilterChanged(Live::new("fo".to_string())),
+        "two different queries are two ticks"
+    );
+    assert_eq!(
+        commit,
+        ComboEmission::Committed(Commit::new("wrap".to_string())),
+        "the same pick is one commit"
+    );
+    assert_ne!(
+        commit,
+        ComboEmission::Committed(Commit::new("tab".to_string())),
+        "two different picks are two commits"
+    );
+    assert_eq!(
+        cancel,
+        ComboEmission::Cancelled(Cancel::new(ComboSnapshot::new(
+            Some("wrap".to_string()),
+            None
+        ))),
+        "the same revert is one cancel"
+    );
+    assert_ne!(
+        cancel,
+        ComboEmission::Cancelled(Cancel::new(ComboSnapshot::new(
+            Some("wrap".to_string()),
+            Some("wo".to_string()),
+        ))),
+        "a revert that also restores a filter is a different cancel"
+    );
+
+    // Cross-tier: the tier is matched before the payload, so no payload can
+    // make two tiers look alike.
+    assert_ne!(
+        open, filter,
+        "a toggle must never compare equal to a filter tick"
+    );
+    assert_ne!(
+        open, commit,
+        "a toggle must never compare equal to a commit"
+    );
+    assert_ne!(
+        filter, cancel,
+        "a filter tick must never compare equal to a cancel"
+    );
+    assert_ne!(
+        commit, cancel,
+        "a commit of wrap must never compare equal to a cancel restoring wrap"
+    );
+}
+
+#[test]
+fn combo_emissions_print_their_tier_and_payload() {
+    assert_eq!(
+        format!("{:?}", ComboEmission::<String>::OpenChanged(true)),
+        "OpenChanged(true)",
+        "a toggle must show which way the flyout moved"
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            ComboEmission::<String>::FilterChanged(Live::new("wo".to_string()))
+        ),
+        "FilterChanged(\"wo\")",
+        "a filter tick must show the query it carries"
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            ComboEmission::<String>::Committed(Commit::new("wrap".to_string()))
+        ),
+        "Committed(\"wrap\")",
+        "a commit must show the application's own id"
+    );
+
+    let printed = format!(
+        "{:?}",
+        ComboEmission::<String>::Cancelled(Cancel::new(ComboSnapshot::new(
+            Some("wrap".to_string()),
+            None,
+        )))
+    );
+    assert!(
+        printed.starts_with("Cancelled(ComboSnapshot {") && printed.contains("wrap"),
+        "a cancel must announce its tier and the snapshot it restores, got {printed}"
+    );
+}
+
+#[test]
+fn only_a_commit_or_a_cancel_moves_the_value() {
+    assert!(
+        !ComboEmission::<String>::OpenChanged(true).is_value_change(),
+        "a toggle only reports where the flyout stands"
+    );
+    assert!(
+        !ComboEmission::<String>::FilterChanged(Live::new("wo".to_string())).is_value_change(),
+        "a filter tick previews the query without deciding anything"
+    );
+    assert!(
+        ComboEmission::<String>::Committed(Commit::new("wrap".to_string())).is_value_change(),
+        "a pick moves the value"
+    );
+    assert!(
+        ComboEmission::<String>::Cancelled(Cancel::new(ComboSnapshot::new(None, None)))
+            .is_value_change(),
+        "a cancel writes the revert back, so it moves the value too"
+    );
+}
+
+#[test]
+fn a_fresh_host_reports_an_idle_transcript() {
+    let (host, _focus) = pair();
+
+    assert!(!host.is_open(), "a fresh host has no flyout");
+    assert!(!host.gesture_open(), "and holds no pre-open snapshot");
+    assert_eq!(host.filter(), None, "and no working filter");
+    assert!(!host.hovered(), "and the pointer is not over the trigger");
+    assert!(!host.pressed(), "and no press is down");
+    assert_eq!(
+        host.control(),
+        &control(),
+        "and it reports the identity it was built for"
+    );
+    assert!(
+        !host.cascade().is_open(),
+        "and its menu engine has nothing mounted"
+    );
+
+    assert!(
+        ComboOutcome::<String>::noop().is_noop(),
+        "an empty outcome must call itself a noop"
+    );
+    assert!(
+        !ComboOutcome::<String>::emissions(vec![ComboEmission::OpenChanged(true)]).is_noop(),
+        "one toggle is not nothing"
+    );
+}
+
+#[test]
+fn closing_a_flyout_that_never_opened_says_nothing() {
+    let (mut host, mut focus) = pair();
+
+    let out = host.close(&mut focus);
+    assert!(
+        out.is_noop(),
+        "closing an already-closed flyout must not report a toggle, saw {:?}",
+        out.emissions
+    );
+    assert!(
+        !host.gesture_open(),
+        "and there is no snapshot to drop behind it"
+    );
+
+    // The same refusal through the trigger, and through a control the
+    // application has disabled.
+    let out = host.toggle(&model().disabled(), &mut focus);
+    assert!(
+        out.is_noop(),
+        "a disabled control's trigger must open nothing, saw {:?}",
+        out.emissions
+    );
+    assert!(!host.is_open(), "and the flyout stays shut");
+    assert!(
+        !host.gesture_open(),
+        "and no snapshot is captured for a gesture that never started"
+    );
+}
+
+#[test]
+fn clearing_the_filter_owns_it_without_reporting_a_tick() {
+    let (mut host, mut focus) = pair();
+    let model = model().editable().with_filter("wo".to_string());
+
+    // Clearing has no query left to announce, but the host takes ownership
+    // of the filter either way — from here the model's own query is ignored.
+    let cleared = host.on_filter_typed(&model, String::new(), &mut focus);
+    assert!(
+        cleared.is_noop(),
+        "clearing a filter that was never typed has nothing to report, saw {:?}",
+        cleared.emissions
+    );
+    assert_eq!(host.filter(), None, "the working copy is empty");
+
+    let typed = host.on_filter_typed(&model, "fo".to_string(), &mut focus);
+    assert_eq!(
+        live(&typed),
+        Some("fo"),
+        "the next keystroke is still reported live"
+    );
+    assert_eq!(
+        host.filter(),
+        Some("fo"),
+        "and the working copy is what carries it"
+    );
+}
+
+#[test]
+fn a_disabled_control_refuses_the_filter_channel_too() {
+    let (mut host, mut focus) = pair();
+    let model = model().editable().disabled();
+
+    let out = host.on_filter_typed(&model, "wo".to_string(), &mut focus);
+    assert!(
+        out.is_noop(),
+        "a disabled control has no buffer to type into, saw {:?}",
+        out.emissions
+    );
+    assert_eq!(host.filter(), None, "and its working copy stays untouched");
+}
+
+#[test]
+fn a_press_held_while_the_control_is_disabled_releases_to_nothing() {
+    let (mut host, mut focus) = pair();
+    let live_model = model();
+    host.press(&live_model);
+    assert!(
+        host.pressed(),
+        "precondition: the press is down on a live control"
+    );
+
+    let out = host.release(true, &model().disabled(), &mut focus);
+    assert!(
+        out.is_noop(),
+        "a control disabled under a held press must toggle nothing, saw {:?}",
+        out.emissions
+    );
+    assert!(
+        !host.pressed(),
+        "but the press itself must still be released"
+    );
+    assert!(!host.is_open(), "and no flyout may appear");
+}
+
+#[test]
+fn the_cascade_report_travels_with_the_toggle() {
+    let (mut host, mut focus) = pair();
+    let model = model();
+
+    let opened = host.open(&model, &mut focus);
+    assert!(
+        !opened.cascade.opened().is_empty(),
+        "the open must tell the host which card to mount"
+    );
+    assert!(
+        opened.cascade.closed().is_empty(),
+        "and nothing to tear down"
+    );
+    assert!(host.is_open(), "the flyout is showing");
+
+    let closed = host.close(&mut focus);
+    assert!(
+        !closed.cascade.closed().is_empty(),
+        "the close must report the same card coming back down"
+    );
+    assert!(
+        closed.cascade.opened().is_empty(),
+        "and mount nothing on the way out"
+    );
+    assert!(!host.is_open(), "the flyout is gone");
+    assert!(
+        closed
+            .emissions
+            .contains(&ComboEmission::OpenChanged(false)),
+        "and the application hears the flyout closed"
+    );
+}

@@ -1904,3 +1904,253 @@ fn a_select_is_painted_through_the_real_renderer() {
         "the box a host reads is the box that was painted"
     );
 }
+// ---------------------------------------------------------------------------
+// 8 — the flyout's constants, the stateless helper's state, and its builders
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_flyout_ceiling_is_the_model_constant_the_spec_prices() {
+    assert_eq!(
+        COMBO_FLYOUT_MAX_H, FLYOUT_MAX_HEIGHT,
+        "the trigger module and the model must agree on one ceiling, not two numbers"
+    );
+    assert_eq!(
+        COMBO_FLYOUT_MAX_H, 280.0,
+        "§3.4 prices the flyout at 280px; a retune has to move the token, not this literal"
+    );
+    // The ceiling is only worth pricing if the mounted card obeys it: the card
+    // mounts at the room below the trigger clamped to the ceiling, so a ceiling
+    // of zero would mount the card at nothing at all. The box the card publishes
+    // is therefore the claim, rather than the token itself.
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let items: Vec<SelectOption<String>> = (0..24)
+        .map(|index| SelectOption::new(format!("opt{index}"), format!("Option {index}")))
+        .collect();
+    let model = ComboBoxModel::new(items, "Pick").with_open(true);
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        ComboBox::new(&model)
+            .with_width(Length::Fill)
+            .on_toggle_open(Msg)
+            .into()
+    });
+
+    let published = harness.candidates();
+    let trigger = published[0].bounds;
+    // Traversal order puts the card's own container before the scrollable and
+    // the option rows nested inside it, so the first box below the trigger is
+    // the card the host measures.
+    let card = published
+        .iter()
+        .map(|candidate| candidate.bounds)
+        .find(|bounds| bounds.y >= trigger.y + trigger.height)
+        .expect("an open combo mounts a card below its trigger");
+
+    assert!(
+        card.height > 0.0,
+        "a flyout with no ceiling would mount at zero height, saw {card:?}"
+    );
+    assert!(
+        card.height <= COMBO_FLYOUT_MAX_H,
+        "the mounted card must never outgrow the ceiling it is priced with, saw {card:?}"
+    );
+}
+
+#[test]
+fn the_two_glyphs_the_flyout_paints_are_named_constants() {
+    assert_eq!(CHECK_MARK, "✓", "§3.4 names the selected-row mark");
+    assert_eq!(CHEVRON_GLYPH, "▾", "§3.4 names the trigger's affordance");
+
+    assert_ne!(
+        CHECK_MARK, CHEVRON_GLYPH,
+        "the mark that says 'this row is chosen' cannot be the mark that says 'open me'"
+    );
+    for glyph in [CHECK_MARK, CHEVRON_GLYPH] {
+        assert!(!glyph.is_empty(), "an empty glyph paints nothing at all");
+        assert_eq!(
+            glyph.chars().count(),
+            1,
+            "{glyph:?} is meant to be a single glyph, not a ligature run"
+        );
+        assert!(
+            !glyph.chars().any(char::is_whitespace),
+            "{glyph:?} is whitespace — it would be invisible on every background"
+        );
+    }
+}
+
+#[test]
+fn a_fresh_select_state_is_shut_and_unhovered() {
+    let state = SelectState::default();
+    assert!(
+        !state.is_open,
+        "a select that has never been pressed must not mount a flyout"
+    );
+    assert!(
+        !state.is_hovered,
+        "a fresh state cannot claim the pointer is over the trigger"
+    );
+
+    let engaged = SelectState {
+        is_open: true,
+        is_hovered: true,
+    };
+    assert!(
+        engaged.is_open && engaged.is_hovered,
+        "both channels have to be settable independently"
+    );
+}
+
+#[test]
+fn the_select_widget_carries_its_own_state_and_one_reserved_slot() {
+    let options = languages();
+    let widget = Select::new(&options, None, PickMsg::Chosen);
+    let widget_ref = &widget as &dyn Widget<PickMsg, iced::Theme, iced::Renderer>;
+
+    assert_eq!(
+        widget_ref.tag(),
+        tree::Tag::of::<SelectState>(),
+        "the tag has to name the state iced will hand back, or the state is never reused"
+    );
+
+    let tree = Tree::new(widget_ref);
+    let state = tree.state.downcast_ref::<SelectState>();
+    assert!(
+        !state.is_open && !state.is_hovered,
+        "the state a fresh tree boots with must be the shut state"
+    );
+
+    assert_eq!(
+        widget_ref.children().len(),
+        1,
+        "the flyout card lays itself out against one reserved slot"
+    );
+
+    let mut orphan = Tree::new(widget_ref);
+    orphan.children.clear();
+    widget_ref.diff(&mut orphan);
+    assert_eq!(
+        orphan.children.len(),
+        1,
+        "a tree that lost its slot has to get it back on diff, or the overlay indexes \
+         a child that does not exist"
+    );
+
+    widget_ref.diff(&mut orphan);
+    assert_eq!(
+        orphan.children.len(),
+        1,
+        "diff has to be idempotent — a second pass must not stack a second slot"
+    );
+}
+
+#[test]
+fn a_select_clamps_a_fixed_width_to_its_own_rung_floor() {
+    let options = languages();
+
+    let narrow = Select::new(&options, None, PickMsg::Chosen).with_width(Length::Fixed(24.0));
+    assert_eq!(
+        narrow.width,
+        Length::Fixed(MIN_WIDTH),
+        "a standard-rung select asked for 24px has to clamp to MIN_WIDTH"
+    );
+
+    let compact = Select::new(&options, None, PickMsg::Chosen)
+        .with_rung(ComboRung::Compact)
+        .with_width(Length::Fixed(24.0));
+    assert_eq!(
+        compact.width,
+        Length::Fixed(MIN_WIDTH_COMPACT),
+        "a compact-rung select clamps to its own, lower floor"
+    );
+
+    let generous = Select::new(&options, None, PickMsg::Chosen).with_width(Length::Fixed(400.0));
+    assert_eq!(
+        generous.width,
+        Length::Fixed(400.0),
+        "a width already above the floor must pass through untouched"
+    );
+
+    for length in [Length::Fill, Length::FillPortion(2), Length::Shrink] {
+        let flexible = Select::new(&options, None, PickMsg::Chosen).with_width(length);
+        assert_eq!(
+            flexible.width, length,
+            "only a fixed width has a floor; {length:?} must pass through"
+        );
+    }
+}
+
+#[test]
+fn a_select_declares_its_rung_height_and_its_default_length() {
+    let options = languages();
+
+    let plain = Select::new(&options, None, PickMsg::Chosen);
+    let declared = (&plain as &dyn Widget<PickMsg, iced::Theme, iced::Renderer>).size();
+    assert_eq!(
+        declared.width,
+        Length::Shrink,
+        "a select nobody sized shrinks to its content rather than filling the row"
+    );
+    assert_eq!(
+        declared.height,
+        Length::Fixed(HEIGHT_STANDARD),
+        "the default rung is the standard one"
+    );
+
+    let compact = Select::new(&options, None, PickMsg::Chosen).with_rung(ComboRung::Compact);
+    let compact_declared = (&compact as &dyn Widget<PickMsg, iced::Theme, iced::Renderer>).size();
+    assert_eq!(
+        compact_declared.height,
+        Length::Fixed(HEIGHT_COMPACT),
+        "the declared height follows the rung, not a constant"
+    );
+}
+
+#[test]
+fn the_select_builder_function_is_the_constructor_under_another_name() {
+    let options = languages();
+    let via_helper = select(&options, None, PickMsg::Chosen);
+    let via_new = Select::new(&options, None, PickMsg::Chosen);
+
+    assert_eq!(
+        via_helper.width, via_new.width,
+        "the convenience builder must not quietly re-default the width"
+    );
+    assert_eq!(
+        via_helper.placeholder, via_new.placeholder,
+        "the convenience builder must not quietly re-default the placeholder"
+    );
+    assert_eq!(
+        via_helper.rung, via_new.rung,
+        "the convenience builder must not quietly change the rung"
+    );
+    assert_eq!(
+        via_helper.options.len(),
+        options.len(),
+        "every option is carried"
+    );
+
+    assert_eq!(
+        via_new.placeholder, "Select...",
+        "the shipped placeholder is the documented one"
+    );
+    assert_eq!(
+        via_new.palette.text_muted,
+        Palette::dark().text_muted,
+        "a select starts on the dark palette"
+    );
+
+    let named = select(&options, None, PickMsg::Chosen).with_placeholder("Pick a language");
+    assert_eq!(
+        named.placeholder, "Pick a language",
+        "the placeholder builder has to actually set the field the trigger reads"
+    );
+
+    let tinted = select(&options, None, PickMsg::Chosen).with_palette(alt_palette());
+    assert_eq!(
+        tinted.palette.text_muted,
+        alt_palette().text_muted,
+        "a palette the host supplied must reach the field the draw path reads"
+    );
+}

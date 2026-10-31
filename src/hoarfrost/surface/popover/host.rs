@@ -47,6 +47,8 @@
 //!
 //! [`SurfaceRegistry`]: crate::surface::zorder::SurfaceRegistry
 //! [`UnwindAnswer`]: crate::surface::zorder::UnwindAnswer
+//!
+//! Unit tests live in the sibling `host_tests.rs` sidecar.
 
 use crate::focus::{FocusId, FocusState};
 use crate::geometry::anchor::Placement;

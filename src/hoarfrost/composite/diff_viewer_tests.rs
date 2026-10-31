@@ -1,6 +1,15 @@
+//! Unit tests for the diff viewer composite (`UIF-COMP-015`).
+
 use super::*;
 use crate::binding::Commit;
+use crate::test_helpers::Candidate;
+use crate::test_helpers::{
+    Capture, Harness, KIND_CONTAINER, RecordCandidates, assert_repainted, centre, headless_renderer,
+};
 use crate::token::{shape, size};
+use iced::Point;
+use iced::advanced::widget::operation::black_box;
+use iced::advanced::widget::tree::State as TreeState;
 
 #[test]
 fn test_diff_line_constructors_and_kinds() {
@@ -184,4 +193,526 @@ fn test_from_diff_viewer_into_element() {
     let hunk = DiffHunk::new(1, "@@ -1 +1 @@", vec![DiffLine::context(1, 1, "alpha")]);
     let widget = diff_viewer(DiffViewerModel::new(vec![hunk]));
     let _element: Element<'_, ()> = widget.into();
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for the widget-level contract
+// ---------------------------------------------------------------------------
+
+/// Message the widget-level tests watch, one variant per commit channel.
+#[derive(Debug, Clone, PartialEq)]
+enum DiffMsg {
+    Accept(&'static str),
+    Reject(&'static str),
+    Mode(DiffDisplayMode),
+}
+
+/// Marker stashed in a child tree to see whether `diff` kept it or rebuilt it.
+const SLOT_MARKER: u32 = 0xD1FF;
+
+/// The viewport every widget-level test lays its viewer out in.
+const OFFERED: Size = Size::new(400.0, 300.0);
+
+/// A viewer with every callback wired, so a test can tell which channel fired.
+fn wired(model: DiffViewerModel<&'static str>) -> DiffViewer<'static, DiffMsg, &'static str> {
+    diff_viewer(model)
+        .on_accept_hunk(|commit: Commit<&'static str>| DiffMsg::Accept(commit.into_value()))
+        .on_reject_hunk(|commit: Commit<&'static str>| DiffMsg::Reject(commit.into_value()))
+        .on_mode_change(|commit: Commit<DiffDisplayMode>| DiffMsg::Mode(commit.into_value()))
+}
+
+/// A hunk holding one replacement: a deleted line and its added replacement,
+/// bracketed by context.
+fn sample_hunk(id: &'static str) -> DiffHunk<&'static str> {
+    DiffHunk::new(
+        id,
+        "@@ -10,2 +10,3 @@",
+        vec![
+            DiffLine::context(10, 10, "let mut x = 1;"),
+            DiffLine::deleted(11, "x += 1;"),
+            DiffLine::added(11, "x += 2;"),
+            DiffLine::context(12, 12, "println!(\"{x}\");"),
+        ],
+    )
+}
+
+/// The number of lines [`sample_hunk`] carries.
+const SAMPLE_LINES: usize = 4;
+
+/// The height a unified body of `lines` diff lines occupies.
+fn body_height(lines: usize) -> f32 {
+    lines as f32 * LINE_HEIGHT
+}
+
+/// The action buttons a laid-out viewer publishes, in traversal order: per hunk
+/// the mode toggle, then accept, then reject.
+///
+/// Line rows are [`LINE_HEIGHT`] (18px) and headers [`HEADER_HEIGHT`] (28px), so
+/// the 24px height is unique to the action band — but the band is published
+/// twice over per hunk, because iced 0.14 has every `Row` report its own bounds
+/// through `Operation::container` as well: the row *holding* the buttons arrives
+/// alongside them. A button is therefore a 24px box that no *other* 24px box sits
+/// inside, and a lone button shares its row's bounds exactly, so one box reported
+/// twice counts once.
+fn action_boxes(published: &[Candidate]) -> Vec<Rectangle> {
+    let mut band: Vec<Rectangle> = published
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_CONTAINER)
+        .map(|candidate| candidate.bounds)
+        .filter(|bounds| bounds.height == BUTTON_HEIGHT)
+        .collect();
+    // The row is published immediately before the buttons it holds.
+    band.dedup();
+
+    band.iter()
+        .copied()
+        .filter(|outer| {
+            !band
+                .iter()
+                .any(|inner| inner != outer && inner.is_within(outer))
+        })
+        .collect()
+}
+
+/// The two panes a side-by-side viewer publishes, in traversal order: old left,
+/// new right. Each is the container that starts under the header, holds
+/// `lines` diff lines, and is one half of the width the [`DIVIDER_WIDTH`] seam
+/// leaves over.
+fn side_by_side_panes(published: &[Candidate], offered_width: f32, lines: usize) -> Vec<Rectangle> {
+    let pane_width = (offered_width - DIVIDER_WIDTH) / 2.0;
+
+    published
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_CONTAINER)
+        .map(|candidate| candidate.bounds)
+        .filter(|bounds| {
+            bounds.y == HEADER_HEIGHT
+                && bounds.width == pane_width
+                && bounds.height == body_height(lines)
+        })
+        .collect()
+}
+
+/// Every box a laid-out widget publishes through the operation stream.
+fn published_boxes<Message, Theme, Renderer: iced::advanced::Renderer>(
+    widget: &mut dyn Widget<Message, Theme, Renderer>,
+    tree: &mut Tree,
+    layout: Layout<'_>,
+    renderer: &Renderer,
+) -> Vec<Candidate> {
+    let mut probe = RecordCandidates::default();
+    {
+        let probe: &mut dyn Operation<Vec<Candidate>> = &mut probe;
+        let mut erased = black_box(probe);
+        widget.operate(tree, layout, renderer, &mut erased);
+    }
+    probe.candidates()
+}
+
+/// Move, press and release at `at`, keeping every message the viewer answered.
+fn click<Message: Send + 'static>(
+    harness: &mut Harness<'_, Message, iced::Renderer>,
+    at: Point,
+) -> Vec<Message> {
+    let mut emitted = harness.hover(at);
+    emitted.extend(harness.press(at));
+    emitted.extend(harness.release(at));
+    emitted
+}
+
+// ---------------------------------------------------------------------------
+// The widget's own contract with the host
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_the_viewer_asks_to_fill_the_width_and_shrink_to_its_hunks() {
+    let widget = wired(DiffViewerModel::new(vec![sample_hunk("hunk-1")]));
+    let requested = widget.size();
+
+    assert_eq!(
+        requested.width,
+        Length::Fill,
+        "a diff pane spans the width it is given (UIF-PRIN-004)"
+    );
+    assert_eq!(
+        requested.height,
+        Length::Shrink,
+        "the viewer is as tall as its hunks and must not stretch to fill"
+    );
+    assert_eq!(
+        widget.children().len(),
+        1,
+        "the composite wraps a single content element, so it publishes one child tree"
+    );
+}
+
+#[test]
+fn test_diff_rebuilds_a_missing_child_slot_and_keeps_an_unchanged_one() {
+    let widget = wired(DiffViewerModel::new(vec![sample_hunk("hunk-1")]));
+
+    let mut tree = Tree::empty();
+    assert!(
+        tree.children.is_empty(),
+        "an empty tree carries no child slot to diff"
+    );
+
+    widget.diff(&mut tree);
+    assert_eq!(
+        tree.children.len(),
+        1,
+        "diffing against a tree with no children must create the content slot"
+    );
+
+    tree.children[0].state = TreeState::new(SLOT_MARKER);
+    widget.diff(&mut tree);
+
+    assert_eq!(
+        tree.children.len(),
+        1,
+        "diffing an unchanged content element must neither add nor drop a slot"
+    );
+    // `State::downcast_ref` panics instead of reporting a missing state, so the
+    // survival check is spelled out to keep the failure message meaningful.
+    let survived: Option<&u32> = match &tree.children[0].state {
+        TreeState::Some(state) => state.downcast_ref::<u32>(),
+        TreeState::None => None,
+    };
+    assert_eq!(
+        survived,
+        Some(&SLOT_MARKER),
+        "the content widget did not change, so its child state must survive the diff"
+    );
+}
+
+#[test]
+fn test_only_wired_callbacks_become_hunk_actions() {
+    let mut harness =
+        Harness::headless(|| diff_viewer(DiffViewerModel::new(vec![sample_hunk("hunk-1")])).into());
+    assert!(
+        action_boxes(&harness.candidates()).is_empty(),
+        "a viewer with no callbacks must not offer buttons that answer nothing"
+    );
+
+    harness.set_view(|| {
+        let model = DiffViewerModel::new(vec![sample_hunk("hunk-1")]);
+        diff_viewer(model)
+            .on_mode_change(|commit: Commit<DiffDisplayMode>| DiffMsg::Mode(commit.into_value()))
+            .into()
+    });
+    assert_eq!(
+        action_boxes(&harness.candidates()).len(),
+        1,
+        "only the mode toggle is wired, so only the mode toggle is clickable"
+    );
+
+    harness.set_view(|| wired(DiffViewerModel::new(vec![sample_hunk("hunk-1")])).into());
+    assert_eq!(
+        action_boxes(&harness.candidates()).len(),
+        3,
+        "a wired hunk gets a mode toggle, an accept and a reject action"
+    );
+
+    harness.set_view(|| {
+        let two_hunks = DiffViewerModel::new(vec![sample_hunk("hunk-1"), sample_hunk("hunk-2")]);
+        wired(two_hunks).into()
+    });
+    assert_eq!(
+        action_boxes(&harness.candidates()).len(),
+        6,
+        "every hunk carries its own actions rather than sharing one set"
+    );
+}
+
+#[test]
+fn test_the_mode_button_commits_the_mode_it_switches_to() {
+    let mut harness =
+        Harness::headless(|| wired(DiffViewerModel::new(vec![sample_hunk("hunk-1")])).into());
+
+    let actions = action_boxes(&harness.candidates());
+    assert_eq!(
+        actions.len(),
+        3,
+        "a wired hunk publishes its mode toggle, its accept and its reject action"
+    );
+    assert_eq!(
+        click(&mut harness, centre(actions[0])),
+        vec![DiffMsg::Mode(DiffDisplayMode::SideBySide)],
+        "the leftmost action is the mode toggle, and a unified viewer commits the \
+         mode it switches to, not the mode it is already in"
+    );
+
+    harness.set_view(|| {
+        wired(
+            DiffViewerModel::new(vec![sample_hunk("hunk-1")])
+                .with_mode(DiffDisplayMode::SideBySide),
+        )
+        .into()
+    });
+    let actions = action_boxes(&harness.candidates());
+    assert_eq!(
+        click(&mut harness, centre(actions[0])),
+        vec![DiffMsg::Mode(DiffDisplayMode::Unified)],
+        "a side-by-side viewer offers to go back to unified"
+    );
+}
+
+#[test]
+fn test_accept_and_reject_commit_the_hunk_they_belong_to() {
+    let mut harness = Harness::headless(|| {
+        let two_hunks = DiffViewerModel::new(vec![sample_hunk("hunk-1"), sample_hunk("hunk-2")]);
+        wired(two_hunks).into()
+    });
+
+    let actions = action_boxes(&harness.candidates());
+    assert_eq!(
+        actions.len(),
+        6,
+        "two wired hunks publish mode, accept and reject each, in hunk order"
+    );
+
+    assert_eq!(
+        click(&mut harness, centre(actions[1])),
+        vec![DiffMsg::Accept("hunk-1")],
+        "the first accept button must commit the hunk it was built from"
+    );
+    assert_eq!(
+        click(&mut harness, centre(actions[2])),
+        vec![DiffMsg::Reject("hunk-1")],
+        "the first reject button must commit the hunk it was built from"
+    );
+    assert_eq!(
+        click(&mut harness, centre(actions[4])),
+        vec![DiffMsg::Accept("hunk-2")],
+        "the second hunk's accept button must not reuse the first hunk's id"
+    );
+    assert_eq!(
+        click(&mut harness, centre(actions[5])),
+        vec![DiffMsg::Reject("hunk-2")],
+        "the second hunk's reject button must not reuse the first hunk's id"
+    );
+}
+
+#[test]
+fn test_side_by_side_splits_the_width_and_keeps_one_row_per_diff_line() {
+    let renderer = headless_renderer();
+    let limits = layout::Limits::new(Size::ZERO, OFFERED);
+
+    let unified_model = DiffViewerModel::new(vec![sample_hunk("hunk-1")]);
+    let unified_twin: Element<'_, DiffMsg> = wired(unified_model.clone()).into();
+    let mut unified_tree = Tree::new(&unified_twin);
+    let mut unified = wired(unified_model.clone());
+    let unified_node = unified.layout(&mut unified_tree, &renderer, &limits);
+
+    let paired_model = unified_model.clone().with_mode(DiffDisplayMode::SideBySide);
+    let paired_twin: Element<'_, DiffMsg> = wired(paired_model.clone()).into();
+    let mut paired_tree = Tree::new(&paired_twin);
+    let mut paired = wired(paired_model);
+    let paired_node = paired.layout(&mut paired_tree, &renderer, &limits);
+    let paired_layout = Layout::new(&paired_node);
+    let published = published_boxes(&mut paired, &mut paired_tree, paired_layout, &renderer);
+
+    // The panes are recovered from the tree rather than hard-coded, so the
+    // assertions keep holding when the header padding or the viewport changes.
+    let panes = side_by_side_panes(&published, OFFERED.width, SAMPLE_LINES);
+    assert_eq!(
+        panes.len(),
+        2,
+        "side-by-side publishes an old pane and a new pane, each half the width the \
+         divider leaves over and each tall enough for one row per diff line"
+    );
+    assert_eq!(
+        panes[0].width, panes[1].width,
+        "the two panes split the width 50/50"
+    );
+    assert_eq!(panes[0].x, 0.0, "the old side is the left pane");
+    assert!(
+        panes[1].x > panes[0].x + panes[0].width,
+        "the new side sits right of the old side and its divider: old {:?}, new {:?}",
+        panes[0],
+        panes[1]
+    );
+    assert_eq!(
+        panes[0].height,
+        unified_node.size().height - HEADER_HEIGHT,
+        "each pane carries one row per diff line — a deletion and its addition are \
+         two rows, one per side, and are not folded onto a single shared row: \
+         side-by-side is no shorter than unified"
+    );
+
+    let mut longer = sample_hunk("hunk-1");
+    longer
+        .lines
+        .push(DiffLine::context(13, 13, "// trailing context"));
+    let grown_model = DiffViewerModel::new(vec![longer]);
+    let grown_twin: Element<'_, DiffMsg> = wired(grown_model.clone()).into();
+    let mut grown_tree = Tree::new(&grown_twin);
+    let mut grown = wired(grown_model);
+    let grown_node = grown.layout(&mut grown_tree, &renderer, &limits);
+
+    assert!(
+        grown_node.size().height > unified_node.size().height,
+        "the unified body is as tall as its lines, so an extra line must grow the pane"
+    );
+}
+
+/// The center divider is built with `Length::Fill` height (`diff_viewer.rs`,
+/// `center_divider`), and iced hands a `Fill` child inside a `Shrink` parent the
+/// whole height that parent was offered. The viewer therefore *requests*
+/// `Length::Shrink` (`size()`, pinned by
+/// `test_the_viewer_asks_to_fill_the_width_and_shrink_to_its_hunks`) but *takes*
+/// every pixel of height the host offers it in side-by-side mode, so a diff pane
+/// that only has 72px of rows stretches to 272px of empty `surface.code`.
+///
+/// It should lay out at the height of its rows, the way unified does; the
+/// divider should span the rows rather than the offer. Pinned here until the
+/// product code is decided.
+#[test]
+fn defect_side_by_side_stretches_to_every_pixel_of_height_it_is_offered() {
+    let renderer = headless_renderer();
+    let limits = layout::Limits::new(Size::ZERO, OFFERED);
+
+    let unified_model = DiffViewerModel::new(vec![sample_hunk("hunk-1")]);
+    let unified_twin: Element<'_, DiffMsg> = wired(unified_model.clone()).into();
+    let mut unified_tree = Tree::new(&unified_twin);
+    let mut unified = wired(unified_model.clone());
+    let unified_node = unified.layout(&mut unified_tree, &renderer, &limits);
+
+    let paired_model = unified_model.clone().with_mode(DiffDisplayMode::SideBySide);
+    let paired_twin: Element<'_, DiffMsg> = wired(paired_model.clone()).into();
+    let mut paired_tree = Tree::new(&paired_twin);
+    let mut paired = wired(paired_model);
+    let paired_node = paired.layout(&mut paired_tree, &renderer, &limits);
+    let paired_layout = Layout::new(&paired_node);
+    let published = published_boxes(&mut paired, &mut paired_tree, paired_layout, &renderer);
+
+    assert_eq!(
+        unified_node.size().height,
+        HEADER_HEIGHT + body_height(SAMPLE_LINES),
+        "unified hugs its header and its rows"
+    );
+    assert_eq!(
+        paired_node.size().height,
+        OFFERED.height,
+        "defect: side-by-side takes the whole height it was offered instead of the \
+         height of its rows"
+    );
+
+    let divider = published
+        .iter()
+        .map(|candidate| candidate.bounds)
+        .find(|bounds| bounds.width == DIVIDER_WIDTH)
+        .expect("side-by-side publishes its 1px center divider");
+    assert_eq!(
+        divider.height,
+        OFFERED.height - HEADER_HEIGHT,
+        "defect: the divider spans the offer, not the rows"
+    );
+
+    let panes = side_by_side_panes(&published, OFFERED.width, SAMPLE_LINES);
+    assert_eq!(
+        panes.len(),
+        2,
+        "the rows themselves are still only tall enough for one row per diff line, \
+         which is what makes the stretched divider visible as empty space"
+    );
+    assert!(
+        divider.height > panes[0].height,
+        "defect: the divider outgrows the rows it is meant to separate: divider \
+         {}, pane {}",
+        divider.height,
+        panes[0].height
+    );
+}
+
+#[test]
+fn test_the_viewer_asks_for_a_pointer_only_over_its_actions() {
+    let renderer = headless_renderer();
+    let model = DiffViewerModel::new(vec![sample_hunk("hunk-1")]);
+    let twin: Element<'_, DiffMsg> = wired(model.clone()).into();
+    let mut tree = Tree::new(&twin);
+    let mut widget = wired(model);
+    let limits = layout::Limits::new(Size::ZERO, Size::new(400.0, 300.0));
+    let node = widget.layout(&mut tree, &renderer, &limits);
+    let layout = Layout::new(&node);
+    let viewport = Rectangle::with_size(node.size());
+
+    let widget_dyn: &mut dyn Widget<DiffMsg, iced::Theme, iced::Renderer> = &mut widget;
+    let actions = action_boxes(&published_boxes(widget_dyn, &mut tree, layout, &renderer));
+    assert_eq!(
+        actions.len(),
+        3,
+        "the laid-out viewer must publish its three actions"
+    );
+
+    assert_eq!(
+        widget.mouse_interaction(
+            &tree,
+            layout,
+            mouse::Cursor::Available(centre(actions[1])),
+            &viewport,
+            &renderer,
+        ),
+        mouse::Interaction::Pointer,
+        "a live hunk action must invite the click"
+    );
+
+    assert_eq!(
+        widget.mouse_interaction(
+            &tree,
+            layout,
+            mouse::Cursor::Available(Point::new(200.0, node.size().height - 4.0)),
+            &viewport,
+            &renderer,
+        ),
+        mouse::Interaction::None,
+        "diff text is not a control and must not ask for the pointer"
+    );
+
+    assert!(
+        widget
+            .overlay(&mut tree, layout, &renderer, &viewport, Vector::ZERO)
+            .is_none(),
+        "the viewer has no popover to hand the host"
+    );
+}
+
+#[test]
+fn test_an_empty_diff_paints_nothing_and_a_mode_switch_repaints() {
+    let mut capture = Capture::new();
+    let viewport = Size::new(400.0, 300.0);
+    let pane = Rectangle::new(Point::ORIGIN, viewport);
+
+    let empty = capture.frame(
+        viewport,
+        diff_viewer::<DiffMsg, &'static str>(DiffViewerModel::new(Vec::new())).into(),
+    );
+    assert_eq!(
+        empty.ink_count(pane),
+        0,
+        "a diff with no hunks has nothing to show and must paint no ink at all"
+    );
+
+    let unified = capture.frame(
+        viewport,
+        wired(DiffViewerModel::new(vec![sample_hunk("hunk-1")])).into(),
+    );
+    assert!(
+        unified.has_ink(pane),
+        "a wired hunk paints its header, its actions and its lines"
+    );
+
+    let paired = capture.frame(
+        viewport,
+        wired(
+            DiffViewerModel::new(vec![sample_hunk("hunk-1")])
+                .with_mode(DiffDisplayMode::SideBySide),
+        )
+        .into(),
+    );
+    assert_repainted(
+        &unified,
+        &paired,
+        pane,
+        "switching to side-by-side splits the pane into two columns and moves every line",
+    );
 }

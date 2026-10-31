@@ -7,9 +7,251 @@
 //! the external `typst` binary check `fastmd_pdf::is_typst_available()`
 //! and skip cleanly when it is not installed.
 
-use super::{SaveAsPdfJob, compile_and_save_pdf};
+use super::{SaveAsPdfJob, compile_and_save_pdf, execute_save_as_pdf_blocking};
+use crate::background::LogCategory;
+use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender, ProcessEvent};
 use fastmd_pdf::render_markdown_to_typst;
 use std::path::PathBuf;
+use tokio::sync::broadcast;
+
+/// A sender plus a receiver that was subscribed **before** the producer ran, so
+/// no event can be missed.
+fn event_channel() -> (BackgroundEventSender, broadcast::Receiver<BackgroundEvent>) {
+    let (tx, _rx) = broadcast::channel::<BackgroundEvent>(16);
+    let sender = BackgroundEventSender::new(tx);
+    let receiver = sender.subscribe();
+    (sender, receiver)
+}
+
+/// Drain everything queued on `rx` into `(category, message)` pairs.
+fn drain_log_entries(rx: &mut broadcast::Receiver<BackgroundEvent>) -> Vec<(LogCategory, String)> {
+    let mut entries = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
+                entries.push((entry.category, entry.message));
+            }
+            other => panic!("unexpected background event: {other:?}"),
+        }
+    }
+    entries
+}
+
+/// The empty-content guard runs before any Typst work and before any logging,
+/// so a stray empty note cannot produce a log spam or a half-written PDF.
+#[test]
+fn compile_and_save_pdf_rejects_empty_content_without_logging() {
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("empty.md");
+    std::fs::write(&md, "").unwrap();
+    let job = SaveAsPdfJob::from_path(md.clone());
+
+    let (sender, mut rx) = event_channel();
+    let err = compile_and_save_pdf(&job, Some(&sender))
+        .expect_err("an empty document cannot be exported");
+
+    assert_eq!(
+        err,
+        format!("Markdown content is empty for {}", md.display()),
+        "the guard must name the source file it refused"
+    );
+    assert!(
+        drain_log_entries(&mut rx).is_empty(),
+        "the empty-content guard must not emit a background log entry"
+    );
+    assert!(
+        !dir.path().join("empty.pdf").exists(),
+        "no PDF may be written for an empty document"
+    );
+}
+
+/// Every export attempt must report its outcome to the Background Process Log.
+/// Which branch runs depends on whether the `typst` CLI is installed, so both
+/// outcomes are asserted here (CI has no Typst, developer machines may).
+#[test]
+fn compile_and_save_pdf_logs_the_outcome_of_the_export_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("report.md");
+    std::fs::write(&md, "# Report\n\nBody.\n").unwrap();
+    let job = SaveAsPdfJob::from_path(md);
+
+    let (sender, mut rx) = event_channel();
+    let result = compile_and_save_pdf(&job, Some(&sender));
+    let logs = drain_log_entries(&mut rx);
+
+    assert!(
+        !logs.is_empty(),
+        "an export attempt must always report to the background log"
+    );
+    assert!(
+        logs.iter()
+            .all(|(category, _)| *category == LogCategory::Print),
+        "PDF export entries are categorised as Print, got: {logs:?}"
+    );
+
+    if fastmd_pdf::is_typst_available() {
+        let output = result.expect("a valid document must export when Typst is installed");
+        assert!(
+            logs.iter()
+                .any(|(_, m)| m.starts_with("Compiling PDF for") && m.contains("report.pdf")),
+            "the compile attempt must be announced with its destination, got: {logs:?}"
+        );
+        assert!(
+            logs.iter()
+                .any(|(_, m)| m.starts_with("Exported") && m.contains("bytes")),
+            "a successful export must report the byte count, got: {logs:?}"
+        );
+        let _ = std::fs::remove_file(output);
+    } else {
+        let err = result.expect_err("without the Typst CLI the export must fail");
+        assert_eq!(
+            err, "Typst CLI binary not found in PATH",
+            "the missing-binary error must be reported verbatim"
+        );
+        assert!(
+            logs.iter()
+                .any(|(_, m)| m.contains("Typst CLI binary not found in PATH")
+                    && m.contains("report")),
+            "the failure must be logged against the job title, got: {logs:?}"
+        );
+    }
+}
+
+/// A destination whose parent cannot be created must surface the I/O error and
+/// announce it as a write failure in the log. Requires a real compile, so it
+/// only runs where the Typst CLI is installed.
+#[test]
+fn compile_and_save_pdf_reports_a_failed_parent_creation_to_the_log() {
+    if !fastmd_pdf::is_typst_available() {
+        eprintln!("Skipping: typst CLI binary not found in PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("blocked.md");
+    std::fs::write(&md, "# Blocked\n\nBody.\n").unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "i am a file").unwrap();
+
+    let mut job = SaveAsPdfJob::from_path(md);
+    job.output_path = Some(blocker.join("out.pdf"));
+
+    let (sender, mut rx) = event_channel();
+    let err = compile_and_save_pdf(&job, Some(&sender))
+        .expect_err("a parent blocked by a regular file cannot hold the PDF");
+
+    assert!(
+        err.contains("create_dir_all"),
+        "the error must name the failing directory call, got: {err}"
+    );
+    let logs = drain_log_entries(&mut rx);
+    assert!(
+        logs.iter()
+            .any(|(_, m)| m.starts_with("PDF write failed for") && m.contains("out.pdf")),
+        "the write failure must be announced with the destination, got: {logs:?}"
+    );
+}
+
+/// An existing directory cannot receive the PDF bytes, and the resulting write
+/// error must reach both the caller and the log.
+#[test]
+fn compile_and_save_pdf_reports_a_write_failure_to_the_log() {
+    if !fastmd_pdf::is_typst_available() {
+        eprintln!("Skipping: typst CLI binary not found in PATH");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("directory.md");
+    std::fs::write(&md, "# Directory\n\nBody.\n").unwrap();
+    let taken = dir.path().join("already_a_directory");
+    std::fs::create_dir(&taken).unwrap();
+
+    let mut job = SaveAsPdfJob::from_path(md);
+    job.output_path = Some(taken);
+
+    let (sender, mut rx) = event_channel();
+    let err = compile_and_save_pdf(&job, Some(&sender))
+        .expect_err("a directory cannot be overwritten by a PDF");
+
+    assert!(
+        err.contains("write("),
+        "the error must name the failing write, got: {err}"
+    );
+    let logs = drain_log_entries(&mut rx);
+    assert!(
+        logs.iter()
+            .any(|(_, m)| m.starts_with("PDF write failed for")),
+        "the write failure must be announced, got: {logs:?}"
+    );
+}
+
+/// The UI wrapper must fail before it reaches `opener::open`, so an empty note
+/// never pops a PDF viewer on the developer's desktop.
+#[test]
+fn execute_save_as_pdf_blocking_fails_before_opening_a_viewer() {
+    let dir = tempfile::tempdir().unwrap();
+    let md = dir.path().join("empty.md");
+    std::fs::write(&md, "").unwrap();
+    let job = SaveAsPdfJob::from_path(md);
+
+    let (sender, mut rx) = event_channel();
+    let err = execute_save_as_pdf_blocking(job, Some(sender))
+        .expect_err("an empty document must not reach the viewer");
+
+    assert!(
+        err.contains("Markdown content is empty"),
+        "the wrapper must propagate the compile error, got: {err}"
+    );
+    assert!(
+        drain_log_entries(&mut rx).is_empty(),
+        "the wrapper must not log when the compile guard refused the job"
+    );
+}
+
+/// The job is cloned into the background worker and shown in diagnostics, so
+/// the derived `Clone`/`Debug` must carry the destination override too.
+#[test]
+fn save_as_pdf_job_clone_and_debug_carry_every_field() {
+    let job = SaveAsPdfJob {
+        markdown_path: PathBuf::from("work/notes.md"),
+        markdown_content: "# Notes".to_string(),
+        title: "notes".to_string(),
+        output_path: Some(PathBuf::from("elsewhere/out.pdf")),
+    };
+    let clone = job.clone();
+
+    assert_eq!(clone.markdown_path, job.markdown_path);
+    assert_eq!(clone.markdown_content, job.markdown_content);
+    assert_eq!(clone.title, job.title);
+    assert_eq!(
+        clone.output_path, job.output_path,
+        "the user-chosen destination must survive the clone into the worker"
+    );
+
+    let rendered = format!("{job:?}");
+    assert!(
+        rendered.contains("SaveAsPdfJob") && rendered.contains("out.pdf"),
+        "Debug must name the job and its destination, got: {rendered}"
+    );
+}
+
+/// A path without a file stem still produces a usable job title.
+#[test]
+fn save_as_pdf_job_from_path_without_a_stem_falls_back_to_the_document_title() {
+    let job = SaveAsPdfJob::from_path(PathBuf::from(""));
+
+    assert_eq!(
+        job.title, "Document",
+        "an unreadable or nameless path must fall back to the generic title"
+    );
+    assert_eq!(
+        job.markdown_content, "",
+        "an unreadable path yields no content"
+    );
+    assert!(
+        job.output_path.is_none(),
+        "a job built from a path never has a destination override"
+    );
+}
 
 #[test]
 fn save_as_pdf_job_from_path_reads_markdown() {

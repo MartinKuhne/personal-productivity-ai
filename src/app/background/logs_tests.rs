@@ -998,3 +998,56 @@ fn test_ui_layer_is_inert_without_a_registered_handle() {
         "no event may be delivered to a handle registered after the fact"
     );
 }
+
+/// A destination that already exists as a directory cannot be truncated into a
+/// log file, and `save_logs` must report that instead of writing nothing.
+#[test]
+fn test_save_logs_reports_a_target_that_is_an_existing_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let taken = dir.path().join("export.log");
+    std::fs::create_dir(&taken).unwrap();
+
+    let mut mgr = BackgroundLogs::new();
+    mgr.push_log(make_entry("cannot be written"));
+
+    let err = mgr
+        .save_logs(&taken)
+        .expect_err("a directory cannot be replaced by a log file");
+
+    assert!(
+        taken.is_dir(),
+        "the existing directory must be left untouched, got: {err}"
+    );
+    assert!(
+        !err.to_string().is_empty(),
+        "the error must carry a message, got: {err}"
+    );
+}
+
+/// `save_logs` truncates a previous export: the file must contain exactly the
+/// current buffer, never the old export appended to it.
+#[test]
+fn test_save_logs_truncates_a_previous_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.log");
+    std::fs::write(&path, "stale export from an earlier session\n").unwrap();
+
+    let mut mgr = BackgroundLogs::new();
+    mgr.push_log(make_entry("fresh entry"));
+    mgr.save_logs(&path).expect("the export must succeed");
+
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !written.contains("stale export"),
+        "the previous export must be truncated, got: {written}"
+    );
+    assert!(
+        written.contains("fresh entry"),
+        "the current buffer must be written, got: {written}"
+    );
+    assert_eq!(
+        written.lines().count(),
+        1,
+        "exactly one line per buffered entry, got: {written}"
+    );
+}

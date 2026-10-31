@@ -24,6 +24,7 @@
 //! focus ring land on the stroke, and at `1px` against a `2px` ring the
 //! two are indistinguishable on screen. Subtracting both is what makes the
 //! card's interior a region a child can trust.
+//! Unit tests live in the sibling `card_tests.rs` sidecar.
 
 use crate::token::color::Palette;
 use crate::token::{shape, space};

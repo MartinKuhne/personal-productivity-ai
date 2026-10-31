@@ -44,6 +44,8 @@
 //! [`Placement::flipped_vertical`]: crate::geometry::anchor::Placement::flipped_vertical
 //! [`Placement::flipped_horizontal`]: crate::geometry::anchor::Placement::flipped_horizontal
 //! [`space::XS`]: crate::token::space::XS
+//!
+//! Unit tests live in the sibling `place_tests.rs` sidecar.
 
 use crate::geometry::anchor::{self, Anchor, ControlAlignment, HorizontalAlign, VerticalAlign};
 use crate::token::space;

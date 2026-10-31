@@ -3102,3 +3102,572 @@ fn test_touching_a_field_punishes_a_lagging_error_and_clearing_it_rewards_immedi
         "clearing the error must immediately restore Rest state without lag (UIF-PRIN-009 reward early)"
     );
 }
+// ---------------------------------------------------------------------------
+// 7 — the resolver's private half, the slot's third arm, and the shell plumbing
+// ---------------------------------------------------------------------------
+
+/// All five §3.2 kinds, including the two the original `KINDS` table predates.
+const ALL_FIVE_KINDS: [InputKind; 5] = [
+    InputKind::TextEntry,
+    InputKind::Search,
+    InputKind::DropdownTrigger,
+    InputKind::Password,
+    InputKind::TextArea,
+];
+
+/// A legacy field driven with this file's headless theme and renderer.
+type LegacyField<'a> = TextInput<'a, Msg, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// The glyph colour §3.2 assigns to one painted cell, written out independently
+/// of [`cell_icon_color`] so the resolver is checked against the table rather
+/// than against itself.
+fn expected_glyph_colour(cell: PaintedCell, palette: &Palette) -> Color {
+    match cell {
+        PaintedCell::Rest => palette.text_muted,
+        PaintedCell::Hovered | PaintedCell::Focused => palette.text_primary,
+        PaintedCell::Invalid | PaintedCell::InvalidFocused => palette.status_danger_text,
+        PaintedCell::Disabled => palette.text_disabled,
+    }
+}
+
+/// The `Toggle` arm is a third arm rather than a second `Actionable` because the
+/// two answer different messages. Nothing in the file asked which arm a content
+/// value answers until now.
+#[test]
+fn test_the_toggle_arm_is_the_only_content_that_publishes_a_toggle() {
+    let arms = [
+        SlotContent::Empty,
+        SlotContent::Passive(GLYPH_ERROR),
+        SlotContent::Actionable(GLYPH_CLEAR),
+        SlotContent::Toggle(GLYPH_REVEAL),
+    ];
+
+    for content in arms {
+        assert_eq!(
+            content.is_toggle(),
+            matches!(content, SlotContent::Toggle(_)),
+            "{content:?} reports the wrong toggle verdict",
+        );
+        assert_eq!(
+            content.captures_press(),
+            content.is_actionable() || content.is_toggle(),
+            "{content:?}: owning the press must mean exactly actionable-or-toggle",
+        );
+        assert!(
+            !(content.is_actionable() && content.is_toggle()),
+            "{content:?} claims one press answers two different messages",
+        );
+    }
+
+    assert!(
+        !SlotContent::Empty.captures_press(),
+        "an empty slot must let the press fall through to the caret"
+    );
+    assert!(
+        !SlotContent::Passive(GLYPH_SEARCH).captures_press(),
+        "pressing the idle search mark is decoration, not an action"
+    );
+    assert!(
+        SlotContent::Actionable(GLYPH_CLEAR).captures_press(),
+        "a glyph that answers something has to take the press"
+    );
+    assert!(
+        SlotContent::Toggle(GLYPH_REVEAL).captures_press(),
+        "the reveal control is actionable in every sense except which message it sends"
+    );
+}
+
+/// Which arm `slot_content` takes decides whether the field can be revealed at
+/// all — so the claim "only a secret carries a toggle" has to be checked over
+/// the whole matrix, not just at rest.
+#[test]
+fn test_only_a_secret_carries_a_toggle_and_it_never_loses_its_glyph() {
+    for kind in ALL_FIVE_KINDS {
+        for has_value in [false, true] {
+            for invalid in [false, true] {
+                let content = slot_content(kind, has_value, invalid);
+
+                assert_eq!(
+                    content.is_toggle(),
+                    kind == InputKind::Password,
+                    "{kind:?} with has_value:{has_value} invalid:{invalid} reports \
+                     toggle {} — the reveal affordance must survive validation \
+                     and survive an empty field",
+                    content.is_toggle(),
+                );
+
+                if kind == InputKind::Password {
+                    assert_eq!(
+                        content.glyph(),
+                        Some(GLYPH_REVEAL),
+                        "{kind:?} with has_value:{has_value} invalid:{invalid} \
+                         displaced the reveal glyph",
+                    );
+                }
+
+                assert_eq!(
+                    content.glyph().is_some(),
+                    !matches!(content, SlotContent::Empty),
+                    "{kind:?} {content:?}: an empty slot is the only one with no glyph",
+                );
+            }
+        }
+    }
+}
+
+/// §3.2 prints **one** icon rule for all kinds: the kind decides what sits in
+/// the slot, never what colour it is. `icon_color` matches the kinds separately
+/// on purpose, so that sentence is code — and every arm has to still agree.
+#[test]
+fn test_every_kind_paints_the_slot_glyph_in_its_own_cell_colour() {
+    let palette = palette();
+    let cells = [
+        PaintedCell::Rest,
+        PaintedCell::Hovered,
+        PaintedCell::Focused,
+        PaintedCell::Invalid,
+        PaintedCell::InvalidFocused,
+        PaintedCell::Disabled,
+    ];
+
+    for cell in cells {
+        let want = expected_glyph_colour(cell, &palette);
+
+        for kind in ALL_FIVE_KINDS {
+            let painted = icon_color(kind, cell, &palette);
+            assert!(
+                same_channels(painted, want),
+                "{kind:?} at the {cell:?} cell paints its glyph in {} instead of {}",
+                token_name(painted),
+                token_name(want),
+            );
+            assert!(
+                same_channels(painted, cell_icon_color(cell, &palette)),
+                "{kind:?} at the {cell:?} cell has grown a kind-specific icon rule \
+                 that bypasses the shared cell colour",
+            );
+        }
+    }
+}
+
+/// Decision **D-5**: the error glyph is written *in* the danger colour, never
+/// painted *on* it. The two danger tokens are one palette rename apart.
+#[test]
+fn test_the_error_cell_writes_the_glyph_in_danger_text_never_on_danger_fill() {
+    let palette = palette();
+
+    for cell in [PaintedCell::Invalid, PaintedCell::InvalidFocused] {
+        let glyph = cell_icon_color(cell, &palette);
+
+        assert!(
+            same_channels(glyph, palette.status_danger_text),
+            "the {cell:?} cell paints its glyph in {} rather than status.danger.text",
+            token_name(glyph),
+        );
+        assert!(
+            !same_channels(glyph, palette.status_danger_fill),
+            "the {cell:?} glyph has become status.danger.fill — the glyph is written \
+             in the danger, not painted on it (D-5)"
+        );
+        assert!(
+            !same_channels(glyph, palette.text_muted),
+            "the {cell:?} glyph no longer swaps to a status colour at all",
+        );
+    }
+
+    // The consequence `UIF-ATOM-002c` argues for: an invalid password field
+    // paints its eye in the danger colour even though the error glyph was
+    // displaced by it.
+    let reveal_at_invalid = icon_color(InputKind::Password, PaintedCell::Invalid, &palette);
+    assert!(
+        same_channels(reveal_at_invalid, palette.status_danger_text),
+        "an invalid secret paints its reveal toggle in {}",
+        token_name(reveal_at_invalid),
+    );
+}
+
+/// [`InputStyle::is_error_border`] is a conjunction. Either half alone would
+/// report a resting edge or a focus ring as a validation error.
+#[test]
+fn test_the_error_border_needs_both_the_danger_colour_and_the_focus_weight() {
+    let palette = palette();
+
+    for kind in ALL_FIVE_KINDS {
+        for focused in [false, true] {
+            assert!(
+                style_for(kind, BaseState::Invalid, focused).is_error_border(&palette),
+                "{kind:?} invalid (focused:{focused}) must report the error border \
+                 it is painting",
+            );
+        }
+
+        for (base, focused) in [
+            (BaseState::Rest, false),
+            (BaseState::Hovered, false),
+            (BaseState::Pressed, false),
+            (BaseState::Rest, true),
+            (BaseState::Hovered, true),
+            (BaseState::Disabled, false),
+            (BaseState::Disabled, true),
+        ] {
+            assert!(
+                !style_for(kind, base, focused).is_error_border(&palette),
+                "{kind:?} at {base:?} (focused:{focused}) reports an error border \
+                 it does not have",
+            );
+        }
+    }
+
+    let invalid = style_for(InputKind::TextEntry, BaseState::Invalid, false);
+
+    let hairline_danger = InputStyle {
+        border_width: shape::BORDER_HAIRLINE,
+        ..invalid
+    };
+    assert!(
+        !hairline_danger.is_error_border(&palette),
+        "a 1px danger stroke is a resting edge painted in danger, not the error border"
+    );
+
+    let focus_weight_accent = InputStyle {
+        border_color: palette.accent_border,
+        ..invalid
+    };
+    assert!(
+        !focus_weight_accent.is_error_border(&palette),
+        "a 2px accent stroke is the focus indicator, not a validation error"
+    );
+}
+
+/// The widget's own read-out of its slot, checked against the function that
+/// filled it. A field whose `slot()` drifted from its flags would answer a press
+/// with a glyph it is not showing.
+#[test]
+fn test_a_field_reports_the_slot_its_own_flags_derive() {
+    for kind in ALL_FIVE_KINDS {
+        for value in ["", "typed"] {
+            let plain: LegacyField<'_> = TextInput::new(kind, "hint", value, Msg::Edit, "field");
+            assert_eq!(
+                plain.slot(),
+                slot_content(kind, !value.is_empty(), false),
+                "{kind:?} holding {value:?} reports a slot its own flags do not imply",
+            );
+
+            let flagged = plain.invalid();
+            assert_eq!(
+                flagged.slot(),
+                slot_content(kind, !value.is_empty(), true),
+                "{kind:?} holding {value:?} still reports the pre-validation slot \
+                 after being marked invalid",
+            );
+        }
+    }
+}
+
+/// A bound field derives its slot from the **model**, which is where a
+/// `clearable: false` capability would first show up: the `x` stays, the button
+/// goes.
+#[test]
+fn test_a_bound_field_reports_the_slot_its_model_derives() {
+    let clearable = search("draft");
+    let bound: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::Search, clearable.controlled(), BOUND_ID, Some);
+
+    assert_eq!(
+        bound.slot(),
+        SlotContent::Actionable(GLYPH_CLEAR),
+        "a bound search field holding a value offers a real clear"
+    );
+    assert!(
+        bound.slot().is_actionable() && bound.slot().captures_press(),
+        "the clear has to own the press or it cannot clear anything"
+    );
+    assert!(
+        !bound.slot().is_toggle(),
+        "a clear must never be routed as a reveal"
+    );
+
+    let locked = search("draft").with_clearable(false);
+    let bound_locked: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::Search, locked.controlled(), BOUND_ID, Some);
+
+    assert_eq!(
+        bound_locked.slot(),
+        SlotContent::Passive(GLYPH_CLEAR),
+        "a model that cannot be cleared still shows the x, but as decoration"
+    );
+    assert!(
+        !bound_locked.slot().is_actionable(),
+        "a clear that cannot clear must not report itself as actionable"
+    );
+    assert!(
+        !bound_locked.slot().captures_press(),
+        "an inert x must not steal the press from the editor behind it"
+    );
+    assert_eq!(
+        bound_locked.slot().glyph(),
+        Some(GLYPH_CLEAR),
+        "the capability is gone; the glyph it explains is not"
+    );
+}
+
+/// `Escape` and `Enter` are both taken from the editor on a name match, so the
+/// gate has to reject autorepeat (a held `Enter` would settle once per tick) and
+/// every key that is not the one being asked about.
+#[test]
+fn test_the_named_key_gate_ignores_autorepeat_and_every_other_key() {
+    let enter = Key::Named(Named::Enter);
+    assert!(
+        is_named_key(&key_event(enter.clone(), None), Named::Enter),
+        "a fresh Enter press is the key the commit gate asks for"
+    );
+
+    let mut repeated = key_event(enter.clone(), None);
+    if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = &mut repeated {
+        *repeat = true;
+    }
+    assert!(
+        !is_named_key(&repeated, Named::Enter),
+        "an autorepeated Enter must not settle the same value a second time"
+    );
+
+    assert!(
+        !is_named_key(&key_event(Key::Named(Named::Escape), None), Named::Enter),
+        "a different named key is not the key being asked about"
+    );
+    assert!(
+        !is_named_key(&key_event(Key::Character("a".into()), None), Named::Enter),
+        "a character key is never a named-key match"
+    );
+    assert!(
+        !is_named_key(
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Named::Enter
+        ),
+        "a mouse event is not a key press"
+    );
+    assert!(
+        !is_named_key(
+            &Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(5.0, 5.0),
+            }),
+            Named::Enter
+        ),
+        "a non-keyboard event is not a key press"
+    );
+}
+
+/// Suppressing a message must not suppress the frame the editor asked for:
+/// every non-message side effect the nested shell picked up has to travel.
+#[test]
+fn test_carrying_over_moves_every_side_effect_but_the_messages() {
+    let mut buffer: Vec<Option<Msg>> = Vec::new();
+    let mut inner = Shell::new(&mut buffer);
+    inner.publish(Some(Msg::Clear));
+    inner.capture_event();
+    inner.invalidate_layout();
+    inner.invalidate_widgets();
+    inner.request_redraw();
+    inner.request_input_method(&iced::advanced::InputMethod::<String>::Enabled {
+        cursor: Rectangle::new(Point::new(12.0, 3.0), Size::new(2.0, 18.0)),
+        purpose: iced::advanced::input_method::Purpose::Secure,
+        preedit: None,
+    });
+
+    let mut published: Vec<Msg> = Vec::new();
+    let mut outer = Shell::new(&mut published);
+    carry_over(&inner, &mut outer);
+
+    // A shell that was asked for a frame, as the yardstick — naming iced's
+    // `RedrawRequest` variants here would pin the enum rather than the behaviour.
+    let mut yardstick_buffer: Vec<Msg> = Vec::new();
+    let mut yardstick = Shell::new(&mut yardstick_buffer);
+    yardstick.request_redraw();
+
+    assert!(
+        outer.is_event_captured(),
+        "a suppressed event still has to be reported as captured, or iced hands \
+         it to the next widget"
+    );
+    assert!(
+        outer.is_layout_invalid(),
+        "the editor's layout invalidation was dropped on the way out"
+    );
+    assert!(
+        outer.are_widgets_invalid(),
+        "the editor's widget invalidation was dropped on the way out"
+    );
+    assert_eq!(
+        outer.redraw_request(),
+        yardstick.redraw_request(),
+        "the editor asked for a frame and the wrapper swallowed the request"
+    );
+    assert_eq!(
+        outer.input_method(),
+        inner.input_method(),
+        "the secure-input hint the masked editor asked for did not reach the window"
+    );
+    assert!(
+        published.is_empty(),
+        "carry_over moves side effects, never messages — that is the whole reason \
+         the nested shell exists"
+    );
+}
+
+/// The mirror image: a quiet inner shell must not make the host's shell claim
+/// anything.
+#[test]
+fn test_carrying_over_a_quiet_inner_shell_asks_for_nothing() {
+    let mut buffer: Vec<Option<Msg>> = Vec::new();
+    let inner = Shell::new(&mut buffer);
+
+    let mut published: Vec<Msg> = Vec::new();
+    let mut outer = Shell::new(&mut published);
+    carry_over(&inner, &mut outer);
+
+    let mut quiet_buffer: Vec<Msg> = Vec::new();
+    let quiet = Shell::new(&mut quiet_buffer);
+
+    assert!(
+        !outer.is_event_captured(),
+        "an event the editor ignored must not be reported as captured"
+    );
+    assert!(
+        !outer.is_layout_invalid(),
+        "a pass that changed nothing must not invalidate the layout"
+    );
+    assert!(
+        !outer.are_widgets_invalid(),
+        "a pass that changed nothing must not invalidate widgets"
+    );
+    assert_eq!(
+        outer.redraw_request(),
+        quiet.redraw_request(),
+        "a quiet editor must not ask the window for a frame"
+    );
+    assert_eq!(
+        outer.input_method(),
+        inner.input_method(),
+        "carrying over a quiet shell must leave the input method as it was"
+    );
+}
+
+/// The field starts life with a zero-sized stand-in editor that `sync`
+/// overwrites. If it ever reported a real size, the first layout of a field
+/// would be measured against a phantom.
+#[test]
+fn test_the_placeholder_editor_the_field_starts_with_is_zero_sized() {
+    let mut editor = EmptyEditor;
+    let widget = &mut editor as &mut dyn Widget<Msg, crate::test_helpers::Theme, HeadlessRenderer>;
+
+    let declared = widget.size();
+    assert_eq!(
+        declared.width,
+        Length::Fixed(NO_EXTENT),
+        "the stand-in editor must claim no width"
+    );
+    assert_eq!(
+        declared.height,
+        Length::Fixed(NO_EXTENT),
+        "the stand-in editor must claim no height"
+    );
+
+    let node = widget.layout(
+        &mut Tree::empty(),
+        &headless_renderer(),
+        &layout::Limits::NONE,
+    );
+    assert_eq!(
+        node.size(),
+        Size::new(NO_EXTENT, NO_EXTENT),
+        "the stand-in editor must lay out to nothing, whatever the limits say"
+    );
+}
+
+/// `editor_focused` is the gate every tier routes behind. Both ways it can say
+/// "no" are distinct: no child at all, and a child that is not holding the
+/// keyboard.
+#[test]
+fn test_the_editor_focus_probe_answers_false_until_the_inner_editor_holds_the_keyboard() {
+    assert!(
+        !editor_focused::<HeadlessRenderer>(&Tree::empty()),
+        "a tree with no children cannot be holding the keyboard"
+    );
+
+    let model = search("draft");
+    let widget: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::Search, model.controlled(), BOUND_ID, Some);
+    let tree = bound_tree(&widget);
+
+    assert!(
+        !tree.children.is_empty(),
+        "a field builds an editor child for the probe to read — an empty child \
+         list would make every gate read silently false"
+    );
+    assert!(
+        !editor_focused::<HeadlessRenderer>(&tree),
+        "a freshly built field has not been given the keyboard yet"
+    );
+}
+
+/// The four "nothing" channels the resolver falls back to, and the one layer
+/// function that can actually return `None`.
+#[test]
+fn test_a_style_that_paints_nothing_produces_no_layers() {
+    let palette = palette();
+    assert_eq!(
+        NO_STROKE_WIDTH, 0.0,
+        "no stroke is a zero width, not an absent one"
+    );
+    assert_eq!(
+        NO_FILL,
+        Color::TRANSPARENT,
+        "no fill is transparent, not white"
+    );
+    assert_eq!(
+        NO_RING_COLOR,
+        Color::TRANSPARENT,
+        "an undrawn ring is transparent, not the accent"
+    );
+
+    let bare = InputStyle {
+        background: NO_FILL,
+        text: palette.text_primary,
+        placeholder: palette.text_muted,
+        icon: palette.text_muted,
+        selection_background: palette.accent_fill,
+        selection_foreground: palette.text_strong,
+        border_color: palette.border_subtle,
+        border_width: NO_STROKE_WIDTH,
+        focus_ring_color: NO_RING_COLOR,
+        focus_ring_width: NO_STROKE_WIDTH,
+    };
+    let bounds = outer(240.0, HEIGHT_STANDARD);
+
+    assert!(
+        background_layer(bounds, &bare).is_none(),
+        "a fully transparent fill with no stroke must not emit a layer"
+    );
+    assert!(
+        focus_ring_layer(bounds, &bare).is_none(),
+        "a zero-width ring must not emit a layer"
+    );
+    assert!(
+        !bare.is_error_border(&palette),
+        "a style with no stroke at all cannot be carrying an error border"
+    );
+
+    for base in [
+        BaseState::Rest,
+        BaseState::Hovered,
+        BaseState::Pressed,
+        BaseState::Invalid,
+        BaseState::Disabled,
+    ] {
+        let style = style_for(InputKind::Search, base, false);
+        assert!(
+            background_layer(bounds, &style).is_some(),
+            "every §3.2 cell paints a background; {base:?} emitted none",
+        );
+    }
+}

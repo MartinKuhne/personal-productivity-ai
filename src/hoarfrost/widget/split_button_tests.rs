@@ -741,3 +741,196 @@ fn test_split_button_layers_and_geometry() {
     );
     assert_eq!(ring.fill, Color::TRANSPARENT);
 }
+
+// ===========================================================================
+// Density, state bootstrap and the palette the control paints with
+// ===========================================================================
+
+#[test]
+fn test_height_for_density_answers_the_two_documented_heights() {
+    assert_eq!(
+        height_for_density(ButtonDensity::Compact),
+        HEIGHT_COMPACT,
+        "the compact rung is the small control height"
+    );
+    assert_eq!(
+        height_for_density(ButtonDensity::Standard),
+        HEIGHT_STANDARD,
+        "the standard rung is the medium control height"
+    );
+    assert!(
+        height_for_density(ButtonDensity::Compact) < height_for_density(ButtonDensity::Standard),
+        "a compact split button has to be the shorter of the two, not just differently named"
+    );
+    assert_eq!(
+        height_for_density(ButtonDensity::Compact),
+        height_for_density(ButtonDensity::Compact),
+        "the answer is a pure function of the density, so a rebuild cannot resize the control"
+    );
+}
+
+#[test]
+fn test_a_split_button_state_boots_resting_over_the_control_it_was_named_for() {
+    let state = SplitButtonState::new(FocusId::new("split_state_probe"));
+
+    assert_eq!(
+        state.host.control().as_str(),
+        "split_state_probe",
+        "the host machine drives the control the state was built for"
+    );
+    assert_eq!(
+        state.host.hovered_zone(),
+        SplitZone::Outside,
+        "a fresh state has no half under the pointer"
+    );
+    assert_eq!(
+        state.host.pressed_zone(),
+        None,
+        "and nothing is being held down"
+    );
+    assert!(
+        !state.host.is_menu_open(),
+        "the menu starts shut rather than inheriting an open cascade"
+    );
+    assert!(
+        !state.focusable.is_focused(),
+        "the router has not been told to stop here yet"
+    );
+    assert!(
+        state
+            .focus
+            .group_of(&FocusId::new("split_state_probe"))
+            .is_some(),
+        "the cascade's trap has somewhere to return to on this control"
+    );
+    assert!(
+        state.focus.current().is_none(),
+        "a fresh state has not been tabbed to"
+    );
+
+    let unnamed = SplitButtonState::default();
+    assert_eq!(
+        unnamed.host.control().as_str(),
+        "split-button",
+        "a defaulted state answers to the default control name"
+    );
+    assert!(
+        unnamed
+            .focus
+            .group_of(&FocusId::new("split-button"))
+            .is_some(),
+        "and it registers its trap under that same name"
+    );
+    assert!(
+        !unnamed.focusable.is_focused(),
+        "the defaulted state is resting too"
+    );
+}
+
+#[test]
+fn test_the_palette_a_split_button_paints_with_is_the_one_it_was_given() {
+    let model = SplitButtonModel::primary("Save", sample_rows());
+    let plain = SplitButton::<SplitButtonEmission<String>, String>::controlled(
+        Controlled::new(&model),
+        "split_palette",
+        Some,
+    );
+
+    assert_eq!(
+        plain.palette_ref(),
+        &Palette::dark(),
+        "a split button handed no palette paints with the dark one"
+    );
+
+    let mut tinted = Palette::dark();
+    tinted.status_warning = Color::from_rgb(0.0, 1.0, 0.0);
+    let painted = plain.palette(tinted);
+    assert_eq!(
+        painted.palette_ref(),
+        &tinted,
+        "palette() replaces the tokens the control resolves against"
+    );
+
+    let aliased = SplitButton::<SplitButtonEmission<String>, String>::controlled(
+        Controlled::new(&model),
+        "split_palette",
+        Some,
+    )
+    .with_palette(tinted);
+    assert_eq!(
+        aliased.palette_ref(),
+        painted.palette_ref(),
+        "with_palette() is the same builder under its other name, not a second palette slot"
+    );
+}
+
+#[test]
+fn test_a_layer_becomes_the_quad_it_is_painted_as() {
+    let p = palette();
+    let box_ = rect(0.0, 0.0, 200.0, HEIGHT_STANDARD);
+    let style = resolve_style(ButtonVariant::Primary, REST, REST, &p);
+
+    let layer = primary_background_layer(box_, &style);
+    let quad = layer.quad();
+    assert_eq!(
+        quad.bounds, layer.bounds,
+        "the quad covers exactly the layer's own box"
+    );
+    assert_eq!(
+        quad.border.color, layer.border.color,
+        "and carries the layer's own border rather than a re-resolved one"
+    );
+    assert_eq!(quad.border.width, layer.border.width);
+    assert_eq!(quad.border.radius, layer.border.radius);
+    assert_eq!(
+        quad.shadow,
+        Shadow::default(),
+        "no split-button layer is drawn with a shadow"
+    );
+    assert!(
+        quad.snap,
+        "every split-button layer is drawn on the pixel grid"
+    );
+
+    let divider = divider_layer(box_, &style);
+    assert_eq!(
+        divider.quad().bounds,
+        divider_bounds(box_),
+        "the divider quad is the divider's own one-pixel strip"
+    );
+    assert_eq!(
+        divider.quad().border,
+        Border::default(),
+        "the divider is a fill, not a stroked box"
+    );
+}
+
+#[test]
+fn test_the_seam_and_the_perimeter_are_the_same_hairline() {
+    assert_eq!(
+        PERIMETER_WIDTH, DIVIDER_WIDTH,
+        "the seam between the halves and the box around them are priced at one hairline"
+    );
+    assert_eq!(PERIMETER_WIDTH, shape::BORDER_HAIRLINE);
+    assert_eq!(
+        FOCUS_RING_WIDTH,
+        shape::BORDER_FOCUS,
+        "the ring is the focus stroke, not the hairline doubled up"
+    );
+    // The relation is checked on the strokes that are actually painted: the
+    // ring a focused control draws against the box it is drawn around, rather
+    // than on the two tokens they were built from.
+    let p = palette();
+    let b = rect(0.0, 0.0, 200.0, HEIGHT_STANDARD);
+    let rest_style = resolve_style(ButtonVariant::Primary, REST, REST, &p);
+    let focused_style = resolve_style(ButtonVariant::Primary, REST_FOCUSED, REST_FOCUSED, &p);
+    let ring =
+        focus_ring_layer(b, &focused_style).expect("a focused split button paints a focus ring");
+    let perimeter = primary_background_layer(b, &rest_style);
+    assert!(
+        ring.border.width > perimeter.border.width,
+        "a focus ring has to read as more than the box it is drawn around, saw {} vs {}",
+        ring.border.width,
+        perimeter.border.width,
+    );
+}

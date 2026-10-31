@@ -1044,3 +1044,473 @@ fn a_live_tier_never_equals_a_commit_tier_carrying_the_same_string() {
 
     assert_ne!(live, commit);
 }
+
+// ---------------------------------------------------------------------------
+// 10 — The machine's own read-out
+//
+// The identity, the counters and the in-flight text are the only way a host
+// can see what the machine did on its behalf: how many provider passes it
+// spent, which text is still waiting for an answer, which query the user
+// dismissed, and which row the keyboard is on. Each claim below pins one of
+// those read-outs against a transition the user can actually cause.
+// ---------------------------------------------------------------------------
+
+/// A `QueryChanged` over `text`, spelled out so the equality claims compare
+/// like with like instead of leaving the candidate id type unresolved.
+fn changed(text: &str) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::QueryChanged(Live::new(text.to_string()))
+}
+
+/// A `QueryRequested` for `generation` over `query`.
+fn asked(generation: u64, query: &str) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::QueryRequested {
+        generation,
+        query: query.to_string(),
+    }
+}
+
+/// A `HighlightChanged` for `row`.
+fn roved(row: usize) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::HighlightChanged(row)
+}
+
+/// A `Committed` for candidate `id` under `source`.
+fn picked(id: &str, source: CommitSource) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::Committed(AutoSuggestCommit::new(id.to_string(), source, "L"))
+}
+
+/// A `QueryCommitted` carrying `text`.
+fn settled(text: &str) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::QueryCommitted(Commit::new(text.to_string()))
+}
+
+/// A `QueryCleared` carrying `text`.
+fn cleared(text: &str) -> AutoSuggestEmission<String> {
+    AutoSuggestEmission::QueryCleared(Commit::new(text.to_string()))
+}
+
+#[test]
+fn a_host_can_be_built_at_its_own_debounce_window() {
+    assert_eq!(
+        AutoSuggestHost::<String>::new(control()).debounce_ms(),
+        DEBOUNCE_MS,
+        "a host built with new() trades at the documented window"
+    );
+
+    let mut host: AutoSuggestHost<String> = AutoSuggestHost::with_debounce(control(), 25);
+    assert_eq!(
+        host.debounce_ms(),
+        25,
+        "with_debounce() replaces the window the host trades at"
+    );
+
+    let mut model = AutoSuggestModel::new();
+    let _ = host.note_edit(&mut model, "do".to_string(), T0);
+    assert!(host.is_debouncing(), "the keystroke armed the window");
+
+    let early = host.tick(&mut model, later(24));
+    assert!(
+        early.is_empty(),
+        "one millisecond short of its own window the host must still be silent"
+    );
+    assert_eq!(host.provider_passes(), 0, "and must not have spent a pass");
+
+    let fired = host.tick(&mut model, later(25));
+    assert_eq!(
+        requested(&fired),
+        Some((1, "do".to_string())),
+        "the request fires on the millisecond the window closes"
+    );
+    assert_eq!(
+        host.provider_passes(),
+        1,
+        "and that millisecond is what spends the pass"
+    );
+}
+
+#[test]
+fn the_host_names_its_control_and_mints_one_card_identity_per_control() {
+    let host = AutoSuggestHost::<String>::new(control());
+
+    assert_eq!(
+        host.control(),
+        &control(),
+        "control() reports the focusable the host was built for"
+    );
+    assert_eq!(
+        host.menu_id(),
+        &menu_id_for(&control()),
+        "the card identity is derived from the control, never from the query"
+    );
+
+    let rebuilt = AutoSuggestHost::<String>::new(control());
+    assert_eq!(
+        rebuilt.menu_id(),
+        host.menu_id(),
+        "a rebuilt box claims the card its control already had"
+    );
+
+    let neighbour = AutoSuggestHost::<String>::new(FocusId::new("other-control"));
+    assert_ne!(
+        neighbour.menu_id(),
+        host.menu_id(),
+        "two boxes on one screen must not share one card"
+    );
+}
+
+#[test]
+fn a_fresh_host_reports_no_activity_at_all() {
+    let (host, _focus) = pair();
+
+    assert_eq!(host.generation(), 0, "no request has been numbered yet");
+    assert_eq!(host.in_flight_query(), None, "nothing is with the provider");
+    assert_eq!(host.dismissed_query(), None, "nothing has been dismissed");
+    assert_eq!(host.stale_dropped(), 0, "nothing has been refused");
+    assert_eq!(host.provider_passes(), 0, "no pass has been spent");
+    assert!(!host.is_open(), "the flyout starts shut");
+    assert!(!host.is_busy(), "the field starts idle");
+    assert!(!host.is_debouncing(), "no window is armed");
+    assert_eq!(host.highlighted(), None, "no row is highlighted");
+    assert!(
+        !host.is_dismissed("") && !host.is_dismissed("do"),
+        "before the first dismissal no text at all is under one"
+    );
+}
+
+#[test]
+fn a_host_with_nothing_to_do_reports_nothing() {
+    let (mut host, mut focus) = pair();
+    let mut model = AutoSuggestModel::new();
+
+    assert!(
+        host.tick(&mut model, later(DEBOUNCE_MS * 4)).is_empty(),
+        "a frame with no window armed dispatches no request"
+    );
+    assert!(
+        host.sync(&mut model, &mut focus).is_empty(),
+        "the frame pass opens nothing while no card is open"
+    );
+    assert!(
+        host.escape(&mut model, &mut focus).is_empty(),
+        "Escape on an empty, shut field is not this control's key"
+    );
+    assert_eq!(
+        host.provider_passes(),
+        0,
+        "none of the idle calls may spend a provider pass"
+    );
+    assert_eq!(
+        host.generation(),
+        0,
+        "or number a request that was never made"
+    );
+}
+
+#[test]
+fn the_counters_track_every_pass_the_host_spends() {
+    let (mut host, mut focus) = pair();
+    let mut model = AutoSuggestModel::new();
+    let _ = host.note_focus(&mut model, true, &mut focus);
+
+    let _ = host.note_edit(&mut model, "do".to_string(), T0);
+    assert_eq!(
+        host.generation(),
+        0,
+        "arming a window numbers nothing until it closes"
+    );
+    assert!(!host.is_busy(), "and puts nothing in flight");
+
+    let _ = host.tick(&mut model, later(DEBOUNCE_MS));
+    assert_eq!(host.generation(), 1, "the first request is number one");
+    assert_eq!(host.provider_passes(), 1, "and it is one pass");
+    assert!(host.is_busy(), "the field is waiting on the provider");
+    assert_eq!(
+        host.in_flight_query(),
+        Some("do"),
+        "and the text it waits on is readable"
+    );
+
+    let refused = host.apply_suggestions(&mut model, 7, suggestions(), &mut focus);
+    assert!(
+        refused.is_empty(),
+        "an answer for a generation never asked for reports nothing"
+    );
+    assert_eq!(host.stale_dropped(), 1, "and is counted as a refusal");
+    assert!(
+        host.is_busy(),
+        "a refusal leaves the real request still in flight"
+    );
+    assert_eq!(host.in_flight_query(), Some("do"));
+
+    let applied = host.apply_suggestions(&mut model, 1, suggestions(), &mut focus);
+    assert_eq!(names(&applied), vec!["OpenChanged", "HighlightChanged"]);
+    assert!(!host.is_busy(), "the answer that was asked for clears busy");
+    assert_eq!(
+        host.in_flight_query(),
+        None,
+        "and empties the in-flight text"
+    );
+    assert_eq!(
+        host.stale_dropped(),
+        1,
+        "a refusal already counted stays counted"
+    );
+    assert_eq!(
+        host.provider_passes(),
+        1,
+        "answering a request is not the same as making one"
+    );
+
+    let _ = host.note_edit(&mut model, "doc".to_string(), later(DEBOUNCE_MS + 500));
+    let _ = host.tick(&mut model, later(DEBOUNCE_MS * 2 + 500));
+    assert_eq!(host.generation(), 2, "the next burst gets the next number");
+    assert_eq!(host.provider_passes(), 2, "and spends a pass of its own");
+    assert_eq!(
+        host.in_flight_query(),
+        Some("doc"),
+        "with the text the user stopped on"
+    );
+}
+
+#[test]
+fn losing_focus_empties_the_request_in_flight_and_the_window() {
+    let (mut host, mut focus) = pair();
+    let mut model = AutoSuggestModel::new();
+    let _ = host.note_focus(&mut model, true, &mut focus);
+    let _ = host.note_edit(&mut model, "do".to_string(), T0);
+    let _ = host.tick(&mut model, later(DEBOUNCE_MS));
+    assert!(host.is_busy(), "precondition: a request is outstanding");
+    assert_eq!(host.in_flight_query(), Some("do"));
+
+    let out = host.note_focus(&mut model, false, &mut focus);
+
+    assert!(
+        names(&out).contains(&"QueryCommitted"),
+        "leaving the field settles the text the user typed, saw {:?}",
+        names(&out)
+    );
+    assert!(
+        !host.is_busy(),
+        "and the field stops waiting on a provider nobody is looking at"
+    );
+    assert_eq!(
+        host.in_flight_query(),
+        None,
+        "the unanswered request is dropped rather than left to land later"
+    );
+    assert!(
+        !host.is_debouncing(),
+        "along with any window that was still armed"
+    );
+}
+
+#[test]
+fn the_dismissal_record_covers_exactly_the_text_that_was_dismissed() {
+    let (mut host, mut model, mut focus) = opened();
+    assert_eq!(
+        host.dismissed_query(),
+        None,
+        "precondition: nothing has been dismissed"
+    );
+    assert!(!host.is_dismissed("do"));
+
+    let out = host.escape(&mut model, &mut focus);
+
+    assert_eq!(names(&out), vec!["Dismissed", "OpenChanged"]);
+    assert_eq!(
+        host.dismissed_query(),
+        Some("do"),
+        "the record names the query the user dismissed"
+    );
+    assert!(
+        host.is_dismissed("do"),
+        "that exact text is under the dismissal"
+    );
+    assert!(!host.is_dismissed("d"), "a prefix of it is not");
+    assert!(
+        !host.is_dismissed("dox"),
+        "nor is a longer text that merely starts with it"
+    );
+    assert!(!host.is_dismissed(""), "and neither is the empty query");
+}
+
+#[test]
+fn highlighted_reports_the_row_the_keyboard_is_on() {
+    let (mut host, mut model, mut focus) = opened();
+    assert_eq!(
+        host.highlighted(),
+        Some(0),
+        "opening puts the keyboard on the first row"
+    );
+    assert_eq!(
+        host.highlighted(),
+        model.highlighted_index,
+        "the read-out and the model's projection agree"
+    );
+
+    let _ = host.key(&mut model, AutoSuggestKey::Down, &mut focus);
+    assert_eq!(host.highlighted(), Some(1), "and follows the rove");
+
+    let _ = host.escape(&mut model, &mut focus);
+    assert_eq!(
+        host.highlighted(),
+        None,
+        "closing the card drops the highlight"
+    );
+    assert_eq!(
+        model.highlighted_index, None,
+        "and the model's projection goes with it"
+    );
+}
+
+#[test]
+fn reset_forgets_the_work_in_hand_and_not_the_history() {
+    let (mut host, mut model, mut focus) = opened();
+    let _ = host.apply_suggestions(&mut model, 42, Vec::new(), &mut focus);
+    assert_eq!(host.stale_dropped(), 1, "precondition: one refusal counted");
+
+    let passes = host.provider_passes();
+    let generation = host.generation();
+    host.reset();
+
+    assert_eq!(
+        host.provider_passes(),
+        passes,
+        "a reset cannot un-spend a pass that already happened"
+    );
+    assert_eq!(
+        host.generation(),
+        generation,
+        "a reset cannot un-number a request that already went out"
+    );
+    assert_eq!(
+        host.stale_dropped(),
+        1,
+        "a reset cannot un-count a refusal it did not make"
+    );
+    assert_eq!(
+        host.in_flight_query(),
+        None,
+        "the request in flight is dropped"
+    );
+    assert_eq!(
+        host.dismissed_query(),
+        None,
+        "and the dismissal record with it"
+    );
+    assert!(!host.is_debouncing(), "and the armed window");
+}
+
+#[test]
+fn every_emission_arm_equals_only_itself_and_its_own_payload() {
+    let all: Vec<AutoSuggestEmission<String>> = vec![
+        changed("q"),
+        asked(1, "q"),
+        roved(0),
+        picked("id", CommitSource::Enter),
+        settled("q"),
+        cleared(""),
+        AutoSuggestEmission::Dismissed,
+        AutoSuggestEmission::OpenChanged(true),
+        AutoSuggestEmission::FocusChanged(true),
+    ];
+
+    for (this_index, this) in all.iter().enumerate() {
+        for (that_index, that) in all.iter().enumerate() {
+            if this_index == that_index {
+                assert_eq!(
+                    this,
+                    that,
+                    "a {} must equal another of its own kind",
+                    this.name()
+                );
+            } else {
+                assert_ne!(this, that, "a {} must never equal {that:?}", this.name());
+            }
+        }
+    }
+}
+
+#[test]
+fn two_emissions_of_the_same_arm_differ_only_by_what_they_carry() {
+    assert_eq!(
+        changed("a"),
+        changed("a"),
+        "two live ticks of the same text are the same event"
+    );
+    assert_ne!(
+        changed("a"),
+        changed("b"),
+        "a live tick of other text is a different event"
+    );
+
+    assert_eq!(
+        asked(1, "do"),
+        asked(1, "do"),
+        "the same request described twice is the same request"
+    );
+    assert_ne!(
+        asked(1, "do"),
+        asked(2, "do"),
+        "a later generation over the same text is a different request"
+    );
+    assert_ne!(
+        asked(1, "do"),
+        asked(1, "dox"),
+        "and so is the same generation over other text"
+    );
+
+    assert_eq!(roved(1), roved(1), "the same row twice is the same rove");
+    assert_ne!(roved(1), roved(2), "another row is another rove");
+
+    assert_eq!(
+        picked("a", CommitSource::Enter),
+        picked("a", CommitSource::Enter),
+        "the same candidate and source twice is the same commit"
+    );
+    assert_ne!(
+        picked("a", CommitSource::Enter),
+        picked("b", CommitSource::Enter),
+        "another candidate is another commit"
+    );
+    assert_ne!(
+        picked("a", CommitSource::Enter),
+        picked("a", CommitSource::Tab),
+        "another source is another commit"
+    );
+    assert_ne!(
+        picked("a", CommitSource::Enter),
+        picked("a", CommitSource::Click),
+        "and a third source a third commit"
+    );
+
+    assert_eq!(settled("q"), settled("q"), "the same settle twice matches");
+    assert_ne!(
+        settled("q"),
+        settled("r"),
+        "a settle of other text does not"
+    );
+    assert_eq!(
+        cleared(""),
+        cleared(""),
+        "two clears of the empty string match"
+    );
+    assert_ne!(
+        cleared(""),
+        cleared("q"),
+        "a clear that carried other text is another event"
+    );
+
+    let open: AutoSuggestEmission<String> = AutoSuggestEmission::OpenChanged(true);
+    let shut: AutoSuggestEmission<String> = AutoSuggestEmission::OpenChanged(false);
+    assert_eq!(open, open, "the same flyout edge twice matches");
+    assert_ne!(open, shut, "appearing is not the same event as going away");
+
+    let gained: AutoSuggestEmission<String> = AutoSuggestEmission::FocusChanged(true);
+    let lost: AutoSuggestEmission<String> = AutoSuggestEmission::FocusChanged(false);
+    assert_eq!(gained, gained, "the same focus edge twice matches");
+    assert_ne!(lost, gained, "losing focus is not gaining it");
+
+    let dismissed: AutoSuggestEmission<String> = AutoSuggestEmission::Dismissed;
+    assert_eq!(dismissed, dismissed, "a dismissal always equals another");
+}

@@ -302,3 +302,198 @@ fn test_watcher_publishes_pdf_to_file_event_bus() {
     );
     assert!(event.paths().contains(&pdf));
 }
+
+// ---------------------------------------------------------------------------
+// `start()` registration paths (no OS watcher events required)
+// ---------------------------------------------------------------------------
+
+/// Build an [`AppConfig`] whose content libraries are exactly `roots`.
+fn config_with_roots(roots: &[&std::path::Path]) -> AppConfig {
+    let mut config = AppConfig::default();
+    for (idx, root) in roots.iter().enumerate() {
+        config.content_libraries.push(ContentLibrary {
+            name: format!("lib{idx}"),
+            kind: "text".to_string(),
+            root_folder: root.to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+    }
+    config
+}
+
+/// What [`build_watcher`] hands back: a [`FileWatcher`] plus everything the
+/// caller needs to observe it — the two event buses, the typed background
+/// receiver and the watcher slot.
+type WatcherFixture = (
+    FileWatcher,
+    Bus<FileChanged>,
+    Bus<DirectoryChanged>,
+    tokio::sync::broadcast::Receiver<BackgroundEvent>,
+    Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+);
+
+/// Assemble a [`FileWatcher`] plus everything the caller needs to observe it:
+/// the two event buses, the typed background receiver and the watcher slot.
+fn build_watcher(config: AppConfig) -> WatcherFixture {
+    let (tx, rx) = tokio::sync::broadcast::channel(16);
+    let tx = BackgroundEventSender::new(tx);
+    let file_bus = Bus::new();
+    let dir_bus = Bus::new();
+    let slot: Arc<Mutex<Option<notify::RecommendedWatcher>>> = Arc::new(Mutex::new(None));
+    #[cfg(feature = "image-library")]
+    let (tx_img, _rx_img) = std::sync::mpsc::channel();
+    #[cfg(feature = "image-library")]
+    let watcher = FileWatcher::new(
+        config,
+        tx,
+        file_bus.clone(),
+        dir_bus.clone(),
+        tx_img,
+        slot.clone(),
+    );
+    #[cfg(not(feature = "image-library"))]
+    let watcher = FileWatcher::new(config, tx, file_bus.clone(), dir_bus.clone(), slot.clone());
+    (watcher, file_bus, dir_bus, rx, slot)
+}
+
+#[tokio::test]
+async fn test_start_with_no_content_libraries_still_finishes_and_fills_slot() {
+    // The registration loop simply does not run; the watcher handle must still
+    // be handed to the slot and `Finished` announced.
+    let (mut watcher, _file_bus, _dir_bus, mut rx, slot) = build_watcher(AppConfig::default());
+    watcher.start();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("start() must announce completion")
+        .expect("background channel must still be open");
+    assert!(
+        matches!(event, BackgroundEvent::Fs(FsEvent::Finished)),
+        "expected FsEvent::Finished, got {event:?}"
+    );
+    assert!(
+        slot.lock().unwrap().is_some(),
+        "the watcher handle must be transferred to the slot"
+    );
+}
+
+#[tokio::test]
+async fn test_start_tolerates_a_missing_library_root() {
+    // A content library pointing at a directory that does not exist must make
+    // `watch()` fail and log, but must not abort the remaining registrations
+    // nor prevent the watcher from being handed over.
+    let tmp = tempdir().unwrap();
+    let good = tmp.path().join("good");
+    std::fs::create_dir(&good).unwrap();
+    let missing = tmp.path().join("no-such-library");
+    assert!(!missing.exists());
+
+    let config = config_with_roots(&[&missing, &good]);
+    let (mut watcher, _file_bus, _dir_bus, mut rx, slot) = build_watcher(config);
+    watcher.start();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("start() must announce completion even when one root is unwatchable")
+        .expect("background channel must still be open");
+    assert!(
+        matches!(event, BackgroundEvent::Fs(FsEvent::Finished)),
+        "expected FsEvent::Finished, got {event:?}"
+    );
+    assert!(
+        slot.lock().unwrap().is_some(),
+        "a partially failed registration must still hand the watcher over"
+    );
+}
+
+#[tokio::test]
+async fn test_start_tolerates_a_library_root_that_is_a_regular_file() {
+    // `watch()` on a non-directory is an error path, not a panic.
+    let tmp = tempdir().unwrap();
+    let blocker = tmp.path().join("not-a-directory.md");
+    std::fs::write(&blocker, "x").unwrap();
+
+    let config = config_with_roots(&[&blocker]);
+    let (mut watcher, _file_bus, _dir_bus, mut rx, slot) = build_watcher(config);
+    watcher.start();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("start() must announce completion")
+        .expect("background channel must still be open");
+    assert!(
+        matches!(
+            event,
+            BackgroundEvent::Fs(FsEvent::Finished)
+                | BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher)
+        ),
+        "expected a terminal FsEvent, got {event:?}"
+    );
+    let filled = slot.lock().unwrap().is_some();
+    assert_eq!(
+        matches!(event, BackgroundEvent::Fs(FsEvent::Finished)),
+        filled,
+        "the slot is only filled when a live watcher handle exists"
+    );
+}
+
+#[tokio::test]
+async fn test_start_twice_replaces_the_handed_over_watcher() {
+    // Calling `start()` again builds a second watcher and overwrites the slot;
+    // both runs must announce completion.
+    let tmp = tempdir().unwrap();
+    let config = config_with_roots(&[tmp.path()]);
+    let (mut watcher, _file_bus, _dir_bus, mut rx, slot) = build_watcher(config);
+
+    watcher.start();
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("first start() must announce completion")
+        .expect("background channel must still be open");
+    assert!(
+        matches!(first, BackgroundEvent::Fs(FsEvent::Finished)),
+        "expected FsEvent::Finished from the first start, got {first:?}"
+    );
+    assert!(slot.lock().unwrap().is_some());
+
+    watcher.start();
+    let second = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("second start() must announce completion")
+        .expect("background channel must still be open");
+    assert!(
+        matches!(second, BackgroundEvent::Fs(FsEvent::Finished)),
+        "expected FsEvent::Finished from the second start, got {second:?}"
+    );
+    assert!(
+        slot.lock().unwrap().is_some(),
+        "the slot must hold the most recent watcher handle"
+    );
+}
+
+#[tokio::test]
+async fn test_start_publishes_no_bus_events_without_filesystem_activity() {
+    // Registering the watcher alone must not synthesise file or directory
+    // events — the buses stay empty until the OS reports a change.
+    let tmp = tempdir().unwrap();
+    let config = config_with_roots(&[tmp.path()]);
+    let (mut watcher, file_bus, dir_bus, mut rx, _slot) = build_watcher(config);
+    let file_reader = file_bus.subscribe();
+    let dir_reader = dir_bus.subscribe();
+
+    watcher.start();
+    let finished = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("start() must announce completion");
+    assert!(finished.is_ok(), "background channel must still be open");
+
+    assert!(
+        file_reader.try_recv().is_err(),
+        "no FileChanged may be published by registration alone"
+    );
+    assert!(
+        dir_reader.try_recv().is_err(),
+        "no DirectoryChanged may be published by registration alone"
+    );
+}

@@ -47,7 +47,9 @@
 //! * [`UserCommand::OpenInEditor`] executes, then lifts the freshly
 //!   populated `TextBuffer` into an [`EditorViewModel`].
 //!
-//! Unit tests live in the sibling `update_tests.rs` sidecar.
+//! Unit tests live in the sibling `update_tests.rs` sidecar, with the arms it
+//! does not reach split by concern into `update_reducer_tests.rs` (channel
+//! reducers) and `update_inbound_tests.rs` (background reports and frame tail).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -2707,3 +2709,11 @@ fn reduce_boot(message: BootMessage) -> Task<Message> {
 #[cfg(test)]
 #[path = "update_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "update_reducer_tests.rs"]
+mod reducer_tests;
+
+#[cfg(test)]
+#[path = "update_inbound_tests.rs"]
+mod inbound_tests;

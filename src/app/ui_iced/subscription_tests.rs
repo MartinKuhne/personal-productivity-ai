@@ -947,3 +947,537 @@ fn test_keyboard_lane_builds_and_merges_into_the_main_subscription() {
     let merged = subscription(&receivers);
     drop(merged);
 }
+// ---------------------------------------------------------------------------
+// `menu_key_to_message` — the menu keyboard lane ([UI-056] sibling lane).
+// ---------------------------------------------------------------------------
+
+/// Every navigation key the menu lane claims must arrive as the matching
+/// [`MenuKey`], and nothing else may.
+#[test]
+fn test_menu_navigation_keys_map_to_their_menu_key_messages() {
+    use hoarfrost::surface::menu::cascade::MenuKey;
+
+    let cases = [
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+            MenuKey::Up,
+        ),
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+            MenuKey::Down,
+        ),
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
+            MenuKey::Left,
+        ),
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+            MenuKey::Right,
+        ),
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+            MenuKey::Enter,
+        ),
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
+            MenuKey::Space,
+        ),
+    ];
+
+    for (key, expected) in cases {
+        let message = super::menu_key_to_message(
+            pressed(key.clone(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Ignored,
+            iced::window::Id::unique(),
+        );
+        let expected_message = Some(Message::Menu(crate::ui_iced::message::MenuMessage::Key(
+            expected,
+        )));
+        assert_eq!(
+            message, expected_message,
+            "the {key:?} key press must reach the menu navigation lane"
+        );
+    }
+}
+
+/// `Escape` is deliberately *not* mapped here: dismissal belongs to
+/// `escape_to_message` → `close_topmost`, so a second menu-local rule could
+/// disagree with the registry about how many `Esc`s a nested menu takes.
+#[test]
+fn test_menu_key_lane_leaves_escape_and_unmapped_keys_to_the_other_lanes() {
+    let events = [
+        pressed(escape(), iced::keyboard::Modifiers::empty()),
+        pressed(letter_a(), iced::keyboard::Modifiers::empty()),
+        pressed(letter_a(), iced::keyboard::Modifiers::SHIFT),
+        pressed(
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+            iced::keyboard::Modifiers::empty(),
+        ),
+    ];
+
+    for event in events {
+        assert_eq!(
+            super::menu_key_to_message(
+                event.clone(),
+                iced::event::Status::Ignored,
+                iced::window::Id::unique()
+            ),
+            None,
+            "a key the menu does not navigate with must produce no message: {event:?}"
+        );
+    }
+}
+
+/// A key release is not a navigation step, and a key a widget already
+/// captured belongs to that widget — only an ignored press is a menu step.
+#[test]
+fn test_menu_key_lane_accepts_only_an_ignored_key_press() {
+    let down = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown);
+
+    assert_eq!(
+        super::menu_key_to_message(
+            released(down.clone(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Ignored,
+            iced::window::Id::unique()
+        ),
+        None,
+        "a key release must not move the menu selection"
+    );
+
+    assert_eq!(
+        super::menu_key_to_message(
+            pressed(down.clone(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Captured,
+            iced::window::Id::unique()
+        ),
+        None,
+        "a press a widget captured must not also drive the menu"
+    );
+
+    for event in [
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Window(iced::window::Event::CloseRequested),
+    ] {
+        assert_eq!(
+            super::menu_key_to_message(
+                event.clone(),
+                iced::event::Status::Ignored,
+                iced::window::Id::unique()
+            ),
+            None,
+            "a non-keyboard event must produce no menu message: {event:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Batch → message mapping for the coalescing bus lanes
+// ---------------------------------------------------------------------------
+
+/// A burst of one file change keeps the plain per-event shape so the common
+/// case is unchanged by coalescing.
+#[test]
+fn test_single_element_file_batch_rides_the_plain_file_lane() {
+    let event = FileChanged::updated_one(PathBuf::from("workspace/single.md"));
+
+    assert_eq!(
+        super::map_file_batch(vec![event.clone()]),
+        Message::Inbound(InboundMessage::FileChanged(event)),
+        "a one-element batch must not be wrapped in a batch message"
+    );
+}
+
+/// A burst of several file changes collapses into one batch message and keeps
+/// the publication order the bus delivered ([FMD-066]).
+#[test]
+fn test_multi_element_file_batch_collapses_in_publication_order() {
+    let batch = vec![
+        FileChanged::discovered_one(PathBuf::from("workspace/a.md")),
+        FileChanged::updated_one(PathBuf::from("workspace/b.md")),
+        FileChanged::removed_one(PathBuf::from("workspace/c.md")),
+    ];
+    let expected = batch.clone();
+
+    let message = super::map_file_batch(batch);
+
+    match message {
+        Message::Inbound(InboundMessage::FileChangedBatch(carried)) => {
+            assert_eq!(
+                carried, expected,
+                "the batch must carry every event in the order it was drained"
+            );
+        }
+        other => panic!("expected Inbound(FileChangedBatch), got {other:?}"),
+    }
+}
+
+/// The directory lane collapses bursts the same way, for both change kinds.
+#[test]
+fn test_directory_batch_maps_single_and_multi_element_lanes() {
+    let added = DirectoryChanged {
+        path: PathBuf::from("workspace/new-dir"),
+        kind: DirectoryChangedKind::Added,
+    };
+    let deleted = DirectoryChanged {
+        path: PathBuf::from("workspace/gone-dir"),
+        kind: DirectoryChangedKind::Deleted,
+    };
+
+    assert_eq!(
+        super::map_directory_batch(vec![added.clone()]),
+        Message::Inbound(InboundMessage::DirectoryChanged(added.clone())),
+        "a lone directory change keeps the plain lane"
+    );
+
+    let batch = vec![added.clone(), deleted.clone()];
+    assert_eq!(
+        super::map_directory_batch(batch),
+        Message::Inbound(InboundMessage::DirectoryChangedBatch(vec![added, deleted])),
+        "a burst of directory changes must collapse into one batch message"
+    );
+}
+
+/// The agent lane — the highest-volume bus — must coalesce without reordering
+/// or losing events, and a lone event must keep its plain shape.
+///
+/// [`InboundMessage::Agent`] and [`InboundMessage::AgentBatch`] compare by
+/// **delivery identity** (`Arc::ptr_eq`, see the `PartialEq` impl in
+/// `message.rs`), and the mapper builds its own `Arc`s — so no message built
+/// here can ever compare equal to one the test wraps itself. The arm, the
+/// carried payload and the order are therefore pinned separately instead of by
+/// `assert_eq!` on the whole `Message`.
+#[test]
+fn test_agent_batch_maps_single_and_multi_element_lanes() {
+    let events = all_agent_events();
+    assert!(
+        events.len() >= 2,
+        "the fixture must provide at least two agent events to exercise the batch lane"
+    );
+    let first = events[0].clone();
+    let second = events[1].clone();
+
+    let lone = super::map_agent_batch(vec![first.clone()]);
+    match lone {
+        Message::Inbound(InboundMessage::Agent(carried)) => {
+            assert_eq!(
+                carried.session_id(),
+                first.session_id(),
+                "a lone agent event must ride the plain Agent arm with its session id intact"
+            );
+            assert_eq!(
+                format!("{carried:?}"),
+                format!("{first:?}"),
+                "the lone event must be carried unchanged, not wrapped or rewritten"
+            );
+        }
+        other => panic!("expected Inbound(Agent) for a one-element batch, got {other:?}"),
+    }
+
+    let message = super::map_agent_batch(vec![first.clone(), second.clone()]);
+    match message {
+        Message::Inbound(InboundMessage::AgentBatch(carried)) => {
+            assert_eq!(
+                carried.len(),
+                2,
+                "coalescing must not drop events from the burst"
+            );
+            // Every fixture event shares one session id, so the position is
+            // pinned by the payload itself rather than by `session_id()`.
+            assert_eq!(
+                format!("{:?}", carried[0]),
+                format!("{first:?}"),
+                "the first carried event must be the one that woke the stream"
+            );
+            assert_eq!(
+                format!("{:?}", carried[1]),
+                format!("{second:?}"),
+                "the drained event must keep its position behind the first"
+            );
+        }
+        other => panic!("expected Inbound(AgentBatch), got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lag reporting — [FMD-072] dropped events must be visible, not silent
+// ---------------------------------------------------------------------------
+
+/// A small-capacity channel shared with a [`SharedReceiver`], so a burst that
+/// outruns the lane deterministically produces `RecvError::Lagged`. The sender
+/// is returned alongside the handle so the caller keeps the channel open.
+fn lagged_receiver<T>(events: Vec<T>) -> (SharedReceiver<T>, tokio::sync::broadcast::Sender<T>)
+where
+    T: Clone + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::broadcast::channel::<T>(2);
+    let handle = SharedReceiver::new(rx);
+    for event in events {
+        if tx.send(event).is_err() {
+            panic!("the bus must accept the burst: no receiver is attached");
+        }
+    }
+    (handle, tx)
+}
+
+/// The config lane must turn a lag into an [`InboundMessage::EventsDropped`]
+/// naming its own source, and keep running afterwards.
+#[tokio::test]
+async fn test_config_lane_reports_a_lag_as_events_dropped() {
+    let (handle, _tx) = lagged_receiver(vec![
+        ConfigArrived::new(AppConfig::default()),
+        ConfigArrived::new(AppConfig::default()),
+        ConfigArrived::new(AppConfig::default()),
+    ]);
+
+    let mut stream = config_stream(&handle);
+    let message = stream
+        .next()
+        .await
+        .expect("a dropped-event report must reach the UI, not be swallowed");
+    match message {
+        Message::Inbound(InboundMessage::EventsDropped { source, count }) => {
+            assert_eq!(
+                source,
+                BusSource::Config,
+                "the report must name the bus that dropped events"
+            );
+            assert!(count >= 1, "the report must carry a non-zero count");
+        }
+        other => panic!("expected Inbound(EventsDropped), got {other:?}"),
+    }
+
+    let next = stream
+        .next()
+        .await
+        .expect("a lag is not a disconnect: the lane must keep running");
+    assert!(
+        matches!(next, Message::Inbound(InboundMessage::ConfigArrived(_))),
+        "expected the surviving config event, got {next:?}"
+    );
+}
+
+/// The coalescing file lane reports its lag through the same arm and names the
+/// file source.
+#[tokio::test]
+async fn test_file_lane_reports_a_lag_as_events_dropped() {
+    let (handle, _tx) = lagged_receiver(
+        (0..3)
+            .map(|i| FileChanged::discovered_one(PathBuf::from(format!("lag{i}.md"))))
+            .collect::<Vec<_>>(),
+    );
+
+    let mut stream = file_stream(&handle);
+    let message = stream
+        .next()
+        .await
+        .expect("a dropped-event report must reach the UI");
+    match message {
+        Message::Inbound(InboundMessage::EventsDropped { source, count }) => {
+            assert_eq!(source, BusSource::File, "the file lane must name itself");
+            assert!(count >= 1, "the report must carry a non-zero count");
+        }
+        other => panic!("expected Inbound(EventsDropped), got {other:?}"),
+    }
+
+    let next = stream
+        .next()
+        .await
+        .expect("the file lane must keep running after a lag");
+    assert!(
+        matches!(
+            next,
+            Message::Inbound(InboundMessage::FileChanged(_))
+                | Message::Inbound(InboundMessage::FileChangedBatch(_))
+        ),
+        "expected the surviving file events, got {next:?}"
+    );
+}
+
+/// The directory lane names the directory source in its loss report.
+#[tokio::test]
+async fn test_directory_lane_reports_a_lag_with_its_own_source() {
+    let (handle, _tx) = lagged_receiver(
+        (0..3)
+            .map(|i| DirectoryChanged {
+                path: PathBuf::from(format!("dir{i}")),
+                kind: DirectoryChangedKind::Added,
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    let mut stream = dir_stream(&handle);
+    let message = stream
+        .next()
+        .await
+        .expect("a dropped-event report must reach the UI");
+    match message {
+        Message::Inbound(InboundMessage::EventsDropped { source, count }) => {
+            assert_eq!(
+                source,
+                BusSource::Directory,
+                "the directory lane must name itself"
+            );
+            assert!(count >= 1, "the report must carry a non-zero count");
+        }
+        other => panic!("expected Inbound(EventsDropped), got {other:?}"),
+    }
+}
+
+/// The agent lane — the highest-volume bus — reports its lag too.
+#[tokio::test]
+async fn test_agent_lane_reports_a_lag_with_its_own_source() {
+    let session_id = Uuid::new_v4();
+    let (handle, _tx) = lagged_receiver(
+        (0..3)
+            .map(|i| AgentEvent::Thinking {
+                session_id,
+                text: format!("delta{i}"),
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    let mut stream = agent_stream(&handle);
+    let message = stream
+        .next()
+        .await
+        .expect("a dropped-event report must reach the UI");
+    match message {
+        Message::Inbound(InboundMessage::EventsDropped { source, count }) => {
+            assert_eq!(source, BusSource::Agent, "the agent lane must name itself");
+            assert!(count >= 1, "the report must carry a non-zero count");
+        }
+        other => panic!("expected Inbound(EventsDropped), got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Closed channels — every lane must terminate instead of spinning
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_config_lane_ends_when_the_bus_is_closed() {
+    let (tx, rx) = tokio::sync::broadcast::channel::<ConfigArrived>(4);
+    let handle = SharedReceiver::new(rx);
+    drop(tx);
+
+    let mut stream = config_stream(&handle);
+    assert!(
+        stream.next().await.is_none(),
+        "a closed config bus must end the lane"
+    );
+}
+
+#[tokio::test]
+async fn test_file_lane_ends_when_the_bus_is_closed() {
+    let (tx, rx) = tokio::sync::broadcast::channel::<FileChanged>(4);
+    let handle = SharedReceiver::new(rx);
+    drop(tx);
+
+    let mut stream = file_stream(&handle);
+    assert!(
+        stream.next().await.is_none(),
+        "a closed file bus must end the coalescing lane"
+    );
+}
+
+#[tokio::test]
+async fn test_agent_lane_ends_when_the_bus_is_closed() {
+    let (tx, rx) = tokio::sync::broadcast::channel::<AgentEvent>(4);
+    let handle = SharedReceiver::new(rx);
+    drop(tx);
+
+    let mut stream = agent_stream(&handle);
+    assert!(
+        stream.next().await.is_none(),
+        "a closed agent bus must end the coalescing lane"
+    );
+}
+
+/// The background lane drains what is already queued, then stops when the
+/// forwarding task's sender goes away — the drain loop must break on the
+/// disconnected error rather than the empty one.
+#[tokio::test]
+async fn test_background_stream_drains_a_queued_burst_before_a_closed_channel() {
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_futures(receiver);
+    sender
+        .unbounded_send(BackgroundEvent::Fs(FsEvent::Finished))
+        .expect("send");
+    sender
+        .unbounded_send(BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher))
+        .expect("send");
+    drop(sender);
+
+    let mut stream = background_stream(&handle);
+    let message = stream
+        .next()
+        .await
+        .expect("both queued events must be coalesced before the channel closes");
+    match message {
+        Message::Inbound(InboundMessage::BackgroundBatch(events)) => {
+            assert_eq!(events.len(), 2, "the drain must take the second event");
+        }
+        other => panic!("expected Inbound(BackgroundBatch), got {other:?}"),
+    }
+    assert!(
+        stream.next().await.is_none(),
+        "a closed and drained background channel must end the lane"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SharedReceiver direct access + the menu lane
+// ---------------------------------------------------------------------------
+
+/// [`SharedReceiver::lock`] hands out the raw receiver, which is how a caller
+/// outside the stream builders reads the same channel without respawning it.
+#[tokio::test]
+async fn test_shared_receiver_lock_reads_the_shared_channel() {
+    let bus: Bus<FileChanged> = Bus::new();
+    let handle = SharedReceiver::from_bus(&bus);
+    let event = FileChanged::updated_one(sample_path());
+    bus.publish(event.clone());
+
+    let mut guard = handle.lock().await;
+    let received = guard
+        .recv()
+        .await
+        .expect("the published event must be readable through the lock");
+    assert_eq!(received, event, "the event must arrive unchanged");
+    drop(guard);
+
+    // The same handle still feeds the stream lane afterwards.
+    bus.publish(FileChanged::removed_one(sample_path()));
+    let message = file_stream(&handle)
+        .next()
+        .await
+        .expect("the lane reads the same channel the lock did");
+    assert!(
+        matches!(message, Message::Inbound(InboundMessage::FileChanged(_))),
+        "expected a file event, got {message:?}"
+    );
+}
+
+/// The menu lane is mounted conditionally by `app.rs`; it must build on its own
+/// and merge into the whole-app subscription without displacing the other
+/// lanes.
+#[test]
+fn test_menu_keyboard_lane_merges_into_the_app_subscription() {
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
+    drop(sender);
+    let receivers = BusReceivers::new(
+        &Bus::<ConfigArrived>::new(),
+        &Bus::<FileChanged>::new(),
+        &Bus::<DirectoryChanged>::new(),
+        &Bus::<AgentEvent>::new(),
+        receiver,
+    );
+
+    let lane: iced::Subscription<Message> = super::menu_keyboard_events();
+    let merged = iced::Subscription::batch([subscription(&receivers), lane]);
+    drop(merged);
+
+    // Rebuilding the menu lane (open -> close -> open) must be cheap and safe.
+    let again = super::menu_keyboard_events();
+    drop(again);
+}

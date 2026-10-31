@@ -40,6 +40,8 @@
 //! something you will hear back about".
 //!
 //! [`VisualState`]: crate::state::VisualState
+//!
+//! Unit tests live in the sibling `button_controller_tests.rs` sidecar.
 
 use std::fmt;
 

@@ -25,6 +25,8 @@
 //! [`Ephemeral`]: crate::binding::Ephemeral
 //! [`ResponsiveLayout`]: crate::binding::ResponsiveLayout
 //! [`ButtonController`]: crate::widget::button_controller::ButtonController
+//!
+//! Unit tests live in the sibling `button_model_tests.rs` sidecar.
 
 use crate::binding::{
     ActionPending, Breakpoint, Controlled, LabelMode, Measurement, ResponsiveLayout,

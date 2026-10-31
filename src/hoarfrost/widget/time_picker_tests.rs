@@ -2333,3 +2333,191 @@ fn test_headless_render_time_picker_unselected_and_stepped_states() {
     let mut plain = Harness::<(), _>::headless(move || time_picker::<()>(clean.clone()).into());
     plain.render();
 }
+
+// ===========================================================================
+// The strings the trigger and the drum are drawn from
+//
+// Every glyph, separator and placeholder in this group is a `pub const` the
+// paint path reads directly. Pinning them here means a change to one has to
+// be a decision, not a typo in a format string somewhere else.
+// ===========================================================================
+
+#[test]
+fn test_the_meridian_prints_the_letters_the_drum_header_uses() {
+    assert_eq!(
+        AmPm::Am.as_str(),
+        LABEL_AM,
+        "the AM meridian is spelled with the label constant"
+    );
+    assert_eq!(
+        AmPm::Pm.as_str(),
+        LABEL_PM,
+        "and the PM meridian is spelled with its own"
+    );
+    assert_eq!(
+        AmPm::Am.to_string(),
+        LABEL_AM,
+        "the Display form is the same two letters, so a formatted meridian cannot drift from the header"
+    );
+    assert_eq!(AmPm::Pm.to_string(), LABEL_PM, "on both sides of noon");
+
+    assert_eq!(AmPm::Am.toggle(), AmPm::Pm, "toggling AM lands on PM");
+    assert_eq!(
+        AmPm::Pm.toggle(),
+        AmPm::Am,
+        "and toggling PM lands back on AM"
+    );
+    assert_eq!(
+        AmPm::Am.toggle().toggle(),
+        AmPm::Am,
+        "two toggles are the identity, so a double tap cannot leave the meridian unnamed"
+    );
+}
+
+#[test]
+fn test_a_civil_time_prints_the_form_the_trigger_shows() {
+    let morning = CivilTime::new(7, 5, 9).unwrap();
+    assert_eq!(
+        morning.to_string(),
+        "07:05",
+        "the Display form is the 24-hour clock with the seconds left off"
+    );
+    assert_eq!(
+        morning.to_string_24h(true),
+        "07:05:09",
+        "asking for seconds widens the same string rather than reformatting it"
+    );
+    assert_eq!(
+        morning.to_string_12h(false),
+        "07:05 AM",
+        "the 12-hour form keeps the hour it already had before noon"
+    );
+    assert_eq!(
+        morning.to_string_12h(true),
+        "07:05:09 AM",
+        "and carries the meridian after the seconds, not before them"
+    );
+
+    let evening = CivilTime::new(19, 5, 9).unwrap();
+    assert_eq!(
+        evening.to_string(),
+        "19:05",
+        "the 24-hour form never folds the afternoon away"
+    );
+    assert_eq!(
+        evening.to_string_12h(true),
+        "07:05:09 PM",
+        "the 12-hour form folds it to the same morning hour with PM on the end"
+    );
+
+    assert_eq!(
+        CivilTime::midnight().to_string_12h(false),
+        "12:00 AM",
+        "midnight is twelve in the morning, not zero"
+    );
+    assert_eq!(
+        CivilTime::noon().to_string_12h(false),
+        "12:00 PM",
+        "and noon is twelve in the afternoon, not zero and not zero-hundred"
+    );
+    assert_eq!(
+        CivilTime::midnight().to_string(),
+        "00:00",
+        "while the 24-hour trigger still reads midnight as the first minute of the day"
+    );
+}
+
+#[test]
+fn test_the_separators_and_placeholders_are_the_strings_the_formats_build() {
+    assert!(!CLOCK_ICON.is_empty(), "the trigger has a clock to draw");
+    assert_eq!(TIME_SEP, ":", "the clock separator is a bare colon");
+    assert_eq!(
+        TIME_SEP_SPACED,
+        format!("{SPACE}{TIME_SEP}{SPACE}", SPACE = SPACE_SEP),
+        "the spaced separator is the bare one with the ordinary space either side"
+    );
+
+    assert_eq!(
+        PLACEHOLDER_24H,
+        format!("--{TIME_SEP}--"),
+        "the 24-hour placeholder is an empty hour and an empty minute"
+    );
+    assert_eq!(
+        PLACEHOLDER_24H_SEC,
+        format!("--{TIME_SEP}--{TIME_SEP}--"),
+        "and the seconds variant adds one more segment, not a wider one"
+    );
+    assert_eq!(
+        PLACEHOLDER_12H,
+        format!("--{TIME_SEP}--{SPACE}--", SPACE = SPACE_SEP),
+        "the 12-hour placeholder reserves a meridian slot after a space"
+    );
+    assert_eq!(
+        PLACEHOLDER_12H_SEC,
+        format!("--{TIME_SEP}--{TIME_SEP}--{SPACE}--", SPACE = SPACE_SEP),
+        "and its seconds variant keeps that slot in the same place"
+    );
+
+    assert_eq!(
+        LABEL_AM_PM,
+        format!("{LABEL_AM}/{LABEL_PM}"),
+        "the meridian column header is the two meridian labels with the slash between them"
+    );
+    assert_eq!(
+        LABEL_CANCEL, "Cancel",
+        "the footer's left button says what it does in plain words"
+    );
+    assert!(
+        !LABEL_APPLY.is_empty(),
+        "and the footer's right button carries the apply glyph with its word"
+    );
+}
+
+#[test]
+fn test_the_picker_paints_with_the_palette_it_was_given() {
+    let plain = TimePicker::<TestMsg>::new(TimePickerModel::new(None));
+    assert_eq!(
+        plain.palette,
+        Palette::dark(),
+        "a picker handed no palette paints with the dark one"
+    );
+
+    let mut tint = Palette::dark();
+    tint.status_warning = Color::from_rgb(0.0, 1.0, 0.0);
+    let painted = TimePicker::<TestMsg>::new(TimePickerModel::new(None)).palette(tint);
+
+    assert_eq!(
+        painted.palette, tint,
+        "palette() replaces the tokens the drum is drawn with"
+    );
+    assert_eq!(
+        plain.palette,
+        Palette::dark(),
+        "and the builder hands back a new picker rather than editing the one it was called on"
+    );
+}
+
+#[test]
+fn test_the_drum_card_is_rounded_as_a_card_not_as_a_control() {
+    assert_eq!(
+        RADIUS,
+        shape::RADIUS_CARD,
+        "the flyout is a card, so it takes the card radius rather than the widget one"
+    );
+    assert_eq!(
+        HAIRLINE_WIDTH,
+        shape::BORDER_HAIRLINE,
+        "and its rules are the one-pixel hairline"
+    );
+    // The rounding is a compile-time invariant rather than a runtime probe: the
+    // header band and the footer bar are painted square over the card's own
+    // corners, so the radius never survives into the pixels and no render leg
+    // can read it back. The claim is therefore asserted on the two tokens the
+    // card quad is built from, at compile time.
+    const {
+        assert!(
+            RADIUS > HAIRLINE_WIDTH,
+            "a card corner has to be wider than the line drawn along it"
+        );
+    }
+}

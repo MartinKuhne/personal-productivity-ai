@@ -986,3 +986,163 @@ fn test_menu_codes_come_from_the_menu_surface_module() {
         "the rect-invariant line must be emitted by menu_surface"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The refusal vocabulary ([NFR-004], [NFR-009])
+// ---------------------------------------------------------------------------
+
+/// A context-menu id carrying a path-shaped tail — the exact shape that must
+/// never reach a log line, because
+/// [`context_menu::root_id`](crate::ui_iced::context_menu::root_id) builds
+/// real ids this way from the user's filesystem.
+const PATH_BEARING_ID: &str = "context.file./home/tester/PRIVATE-LEAK.md";
+
+/// Every refusal answers with one stable, path-free token so a log back end
+/// can group refusals without dumping the payload they carry.
+#[test]
+fn test_refusal_label_names_every_reason_and_leaks_no_path() {
+    let card = MenuId::new(PATH_BEARING_ID);
+    let rows: Vec<(Option<IgnoredReason>, &'static str)> = vec![
+        (None, "none"),
+        (Some(IgnoredReason::NotOpen), "not_open"),
+        (
+            Some(IgnoredReason::AlreadyOpen { card: card.clone() }),
+            "already_open",
+        ),
+        (
+            Some(IgnoredReason::UnknownCard { card: card.clone() }),
+            "unknown_card",
+        ),
+        (
+            Some(IgnoredReason::NotSubmenu {
+                card: card.clone(),
+                row: 2,
+            }),
+            "not_submenu",
+        ),
+        (
+            Some(IgnoredReason::NoFocusableRows { card: card.clone() }),
+            "no_focusable_rows",
+        ),
+        (
+            Some(IgnoredReason::RowOutOfRange {
+                card: card.clone(),
+                row: 9,
+            }),
+            "row_out_of_range",
+        ),
+        (
+            Some(IgnoredReason::NothingFocused { card: card.clone() }),
+            "nothing_focused",
+        ),
+    ];
+
+    let mut tokens = Vec::new();
+    for (reason, expected) in &rows {
+        let label = refusal_label(reason.as_ref());
+        assert_eq!(
+            label, *expected,
+            "the token for {reason:?} is part of the log vocabulary and must not drift"
+        );
+        assert!(
+            !label.contains("PRIVATE-LEAK") && !label.contains("/home"),
+            "[NFR-009]: a refusal token must describe the reason, never carry the id \
+             it was given, got {label}"
+        );
+        tokens.push(label);
+    }
+
+    let mut unique = tokens.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        tokens.len(),
+        "two reasons sharing one token cannot be told apart in a log back end: {tokens:?}"
+    );
+}
+
+/// Only the two row-addressed refusals carry an index, and the log field must
+/// stay empty for every other reason rather than inventing a row.
+#[test]
+fn test_refusal_row_reports_only_the_variants_that_carry_one() {
+    let card = MenuId::new("surface.test");
+
+    assert_eq!(
+        refusal_row(Some(&IgnoredReason::NotSubmenu {
+            card: card.clone(),
+            row: 4,
+        })),
+        Some(4),
+        "a `NotSubmenu` refusal has to say which row the pointer was on"
+    );
+    assert_eq!(
+        refusal_row(Some(&IgnoredReason::RowOutOfRange {
+            card: card.clone(),
+            row: 17,
+        })),
+        Some(17),
+        "an out-of-range refusal has to say which index ran off the end"
+    );
+
+    for reason in [
+        None,
+        Some(IgnoredReason::NotOpen),
+        Some(IgnoredReason::AlreadyOpen { card: card.clone() }),
+        Some(IgnoredReason::UnknownCard { card: card.clone() }),
+        Some(IgnoredReason::NoFocusableRows { card: card.clone() }),
+        Some(IgnoredReason::NothingFocused { card }),
+    ] {
+        assert_eq!(
+            refusal_row(reason.as_ref()),
+            None,
+            "{reason:?} names no row, so the log field must stay empty rather than \
+             report a row nobody addressed"
+        );
+    }
+}
+
+/// Each drop names *which* link of the anchor chain broke — that distinction
+/// is the entire value of separating the three variants.
+#[test]
+fn test_card_drop_reason_details_name_the_broken_anchor_link() {
+    let rows = [
+        (
+            CardDropReason::ParentRectMissing,
+            "parent card was never solved to a rectangle",
+        ),
+        (
+            CardDropReason::ParentMenuMissing,
+            "cascade does not hold the trigger's parent card",
+        ),
+        (
+            CardDropReason::RowRectMissing,
+            "trigger row index is past the end of the parent menu",
+        ),
+    ];
+    for (reason, expected) in rows {
+        assert_eq!(
+            reason.detail(),
+            expected,
+            "the detail text for {reason:?} is what the log line prints and must not drift"
+        );
+        assert!(
+            !reason.detail().is_empty(),
+            "a drop reason with no detail would log a code nobody can act on"
+        );
+    }
+
+    let details = [
+        CardDropReason::ParentRectMissing.detail(),
+        CardDropReason::ParentMenuMissing.detail(),
+        CardDropReason::RowRectMissing.detail(),
+    ];
+    let mut unique = details.to_vec();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        details.len(),
+        "three different broken links must read differently, got {details:?}"
+    );
+}

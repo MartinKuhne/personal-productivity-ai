@@ -2165,3 +2165,508 @@ fn defect_04_a_failed_publish_is_logged_instead_of_panicking() {
         logs.get_logs()
     );
 }
+// ---------------------------------------------------------------------------
+// `log_file_operation_error` — the shared failure reporter ([NFR-001], [NFR-004])
+// ---------------------------------------------------------------------------
+
+/// A file-operation failure must reach both observability backends: a coded
+/// `ERROR` line for log aggregation and a `Watcher` entry for the in-app log
+/// panel.
+#[test]
+fn log_file_operation_error_reports_a_coded_error_and_a_watcher_log_entry() {
+    let orch = harness();
+    let capture = crate::ui_iced::menu_surface::log_capture::Capture::new();
+
+    crate::ui_iced::menu_surface::log_capture::with_capture(&capture, || {
+        orch.log_file_operation_error("FILE-4001", "Failed to read prompt file", "access denied");
+    });
+
+    let event = capture.with_code("FILE-4001").expect(
+        "a file operation failure must report an ERROR with a stable code ([NFR-001], [NFR-004])",
+    );
+    assert_eq!(
+        event.level,
+        tracing::Level::ERROR,
+        "an application failure is an ERROR, got {:?}",
+        event.level
+    );
+    assert_eq!(
+        event.message, "Failed to read prompt file",
+        "the message must name the operation that failed"
+    );
+    assert_eq!(
+        event.field("error"),
+        Some("access denied"),
+        "the underlying cause must be carried verbatim ([NFR-005])"
+    );
+
+    let logs = orch.background_manager.lock().unwrap();
+    let entry = logs
+        .get_logs()
+        .iter()
+        .find(|entry| entry.message.contains("Failed to read prompt file"))
+        .expect("the failure must also surface in the background log panel");
+    assert!(
+        matches!(entry.category, LogCategory::Watcher),
+        "file operations are reported under the Watcher category, got {:?}",
+        entry.category
+    );
+    assert_eq!(
+        entry.message, "Failed to read prompt file: access denied",
+        "the panel line pairs the failed operation with its cause"
+    );
+}
+
+/// An empty model list is still reported — the reporter never swallows a
+/// failure because the payload looks uninteresting.
+#[test]
+fn log_file_operation_error_reports_even_an_empty_cause() {
+    let orch = harness();
+    let capture = crate::ui_iced::menu_surface::log_capture::Capture::new();
+
+    crate::ui_iced::menu_surface::log_capture::with_capture(&capture, || {
+        orch.log_file_operation_error("FILE-4002", "Failed to move file", "");
+    });
+
+    assert!(
+        capture.has_code_at("FILE-4002", tracing::Level::ERROR),
+        "every reported failure is an ERROR regardless of how thin the cause is"
+    );
+    let logs = orch.background_manager.lock().unwrap();
+    assert!(
+        logs.get_logs()
+            .iter()
+            .any(|entry| entry.message == "Failed to move file: "),
+        "the panel entry is still written, got: {:?}",
+        logs.get_logs()
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `apply_removed_files` — direct state reconciliation
+// ---------------------------------------------------------------------------
+
+/// Removing files must unload the removed document, close only its tab, and
+/// retarget the selection to a surviving tab.
+#[test]
+fn apply_removed_files_unloads_the_removed_document_and_keeps_surviving_tabs() {
+    let mut orch = harness();
+    let kept = PathBuf::from("/tmp/kept.md");
+    let gone = PathBuf::from("/tmp/gone.md");
+    orch.tabs.open_tab(kept.clone());
+    orch.tabs.open_tab(gone.clone());
+    orch.tabs.loaded_path = Some(gone.clone());
+    orch.selection.select_file(gone.clone());
+
+    orch.apply_removed_files(std::slice::from_ref(&gone));
+
+    assert!(
+        orch.tabs.loaded_path.is_none(),
+        "a removed file must not stay marked as the loaded document"
+    );
+    assert!(
+        !orch.tabs.tabs.contains(&gone),
+        "the tab of a removed file must close"
+    );
+    assert!(
+        orch.tabs.tabs.contains(&kept),
+        "tabs for files that still exist must survive the removal"
+    );
+    assert_eq!(
+        orch.selection.selected_file(),
+        Some(&kept),
+        "the selection must retarget to a surviving tab"
+    );
+    assert!(
+        orch.selection.tree_dirty,
+        "the tree has to be rebuilt so the removed row disappears"
+    );
+}
+
+/// Removing a file the user never opened must not disturb the open document.
+#[test]
+fn apply_removed_files_leaves_an_unrelated_loaded_path_untouched() {
+    let mut orch = harness();
+    let loaded = PathBuf::from("/tmp/loaded.md");
+    let other = PathBuf::from("/tmp/other.md");
+    orch.tabs.open_tab(loaded.clone());
+    orch.tabs.loaded_path = Some(loaded.clone());
+
+    orch.apply_removed_files(std::slice::from_ref(&other));
+
+    assert_eq!(
+        orch.tabs.loaded_path.as_deref(),
+        Some(loaded.as_path()),
+        "removing an unrelated file must not unload the open document"
+    );
+    assert!(
+        orch.tabs.tabs.contains(&loaded),
+        "the open tab must stay open when a different file was removed"
+    );
+}
+
+/// An empty removal list reconciles nothing beyond marking the tree dirty,
+/// which keeps the caller's `tree_dirty` contract uniform.
+#[test]
+fn apply_removed_files_with_no_paths_only_dirties_the_tree() {
+    let mut orch = harness();
+    let kept = PathBuf::from("/tmp/kept.md");
+    orch.tabs.open_tab(kept.clone());
+    orch.tabs.loaded_path = Some(kept.clone());
+    orch.selection.tree_dirty = false;
+
+    orch.apply_removed_files(&[]);
+
+    assert!(
+        orch.selection.tree_dirty,
+        "the caller still expects a tree refresh after reconciliation"
+    );
+    assert_eq!(
+        orch.tabs.loaded_path.as_deref(),
+        Some(kept.as_path()),
+        "nothing was removed, so nothing may be unloaded"
+    );
+    assert!(orch.tabs.tabs.contains(&kept), "no tab may close");
+}
+// ---------------------------------------------------------------------------
+// Additional dispatch paths
+// ---------------------------------------------------------------------------
+
+/// A `[DirectoryChanged][Added]` event projects the new directory into the
+/// workspace index and dirties the tree ([REQ-320..322]).
+#[test]
+fn apply_directory_changed_added_indexes_the_new_directory() {
+    let mut orch = harness();
+    let fresh = PathBuf::from("/lib/docs/new-folder");
+    orch.selection.tree_dirty = false;
+
+    orch.apply_directory_changed(DirectoryChanged {
+        path: fresh.clone(),
+        kind: DirectoryChangedKind::Added,
+    });
+
+    assert!(
+        orch.workspace.contains_dir(&fresh),
+        "an added directory must appear in the workspace projection"
+    );
+    assert!(
+        orch.selection.tree_dirty,
+        "the tree must be rebuilt after a directory is added"
+    );
+}
+
+/// The directory bus is drained through the `Workspace` subscriber inside
+/// `process_file_events`, so a directory event alone still reports a change and
+/// dirties the tree.
+#[test]
+fn process_file_events_reports_a_directory_arrival_as_a_change() {
+    let mut orch = harness();
+    let fresh = PathBuf::from("/lib/docs/arrived");
+    orch.selection.tree_dirty = false;
+
+    orch.dir_event_bus.publish(DirectoryChanged {
+        path: fresh.clone(),
+        kind: DirectoryChangedKind::Added,
+    });
+
+    assert!(
+        orch.process_file_events(),
+        "a queued directory event must be reported as a change"
+    );
+    assert!(
+        orch.workspace.contains_dir(&fresh),
+        "the workspace projection must pick the directory up from its own subscriber"
+    );
+    assert!(orch.selection.tree_dirty);
+
+    // The drain is one-shot: with nothing queued the next pass is a no-op.
+    assert!(
+        !orch.process_file_events(),
+        "an idle bus must not report a change"
+    );
+}
+
+/// A live but unarmed `RecommendedWatcher`. The orchestrator only ever stores
+/// and hands these over, so the tests need a real handle without arming any OS
+/// watch — no filesystem events, nothing timing-dependent.
+fn idle_watcher() -> notify::RecommendedWatcher {
+    notify::recommended_watcher(|_res: Result<notify::Event, notify::Error>| {
+        // Never called: the watcher is not watching anything.
+    })
+    .expect("an unarmed notify watcher must be constructible")
+}
+
+/// Handing over the indexer's watcher is a take, not a peek: the slot is emptied
+/// so a later frame cannot adopt the same watcher twice, and `Finished` adopts
+/// whatever the indexer left behind.
+#[test]
+fn task_take_finished_watcher_hands_the_watcher_over_exactly_once() {
+    let mut orch = harness();
+
+    *orch.finished_watcher_slot.lock().unwrap() = Some(idle_watcher());
+
+    assert!(
+        orch.task_take_finished_watcher().is_some(),
+        "a watcher left in the slot must be handed to the caller"
+    );
+    assert!(
+        orch.task_take_finished_watcher().is_none(),
+        "the slot must be empty after the take, got a second watcher"
+    );
+
+    *orch.finished_watcher_slot.lock().unwrap() = Some(idle_watcher());
+    orch.handle_fs_event(FsEvent::Finished);
+
+    assert!(
+        orch._watcher.is_some(),
+        "`Finished` must adopt the finished watcher into the application's ownership"
+    );
+    assert!(orch.workspace.indexing_finished);
+    assert!(
+        orch.task_take_finished_watcher().is_none(),
+        "adoption must consume the slot, not copy out of it"
+    );
+}
+
+/// A successfully read prompt file is submitted as a skill session, with the
+/// prompt's own target file becoming the active selection.
+#[test]
+fn handle_user_file_operation_result_prompt_loaded_starts_the_skill_session() {
+    let mut orch = harness();
+    let target = PathBuf::from("/lib/skills/weekly.md");
+
+    orch.handle_user_file_operation_result(UserFileOperationResult::PromptLoaded {
+        content: Ok("Summarise the week".to_string()),
+        target_dir: None,
+        target_file: Some(target.clone()),
+    });
+
+    assert_eq!(
+        orch.selection.selected_file.as_ref(),
+        Some(&target),
+        "the prompt's target file must become the active file for the session"
+    );
+    assert!(
+        orch.agent_panel_state.show_results,
+        "starting a skill session must reveal the results panel"
+    );
+}
+
+/// DEFECT (pinned, deliberately NOT fixed): a `FileLoaded { Err }` for a path
+/// the user has already moved on from is dropped *before* the error arm runs, so
+/// the unreadable file keeps its tab and the failure is never reported.
+///
+/// What the code does (`AppOrchestrator::handle_process_event`): the `FileLoaded`
+/// arm opens with the stale-landing guard that compares the landing path with
+/// `selection.selected_file()` and `return`s for any other path. That guard sits
+/// *above* the `Ok`/`Err` split, so for a non-selected path the `Err` arm is
+/// unreachable — `tabs.close_tab(&path)` never runs and the `Watcher` background
+/// log is never pushed. Only a `tracing::debug!`
+/// (`orchestrator.file_load.stale_dropped`) is emitted, which no user sees.
+///
+/// What it should do: the `Err` arm's own comment states the contract — "Load
+/// failed — do not leave stale content or an open tab" — and [NFR-001] requires
+/// every application failure to produce an ERROR log. Closing the tab of, and
+/// logging for, the path that failed to read is a property of *that path*, not of
+/// the document on screen; only the document projection (`current_markdown`,
+/// `current_yaml`, `toc`, scroll targets) needs the stale guard.
+#[test]
+fn defect_file_loaded_err_for_a_deslected_path_is_dropped_before_the_error_arm() {
+    let mut orch = harness();
+    let failing = PathBuf::from("/lib/broken.md");
+    let viewed = PathBuf::from("/lib/viewed.md");
+
+    // `viewed` is the document on screen; the read for `failing` was abandoned.
+    orch.tabs.open_tab(failing.clone());
+    orch.selection.select_file(viewed.clone());
+    orch.tabs.loaded_path = Some(viewed.clone());
+    orch.pending_file_load = Some(failing.clone());
+
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: failing.clone(),
+        content: Err("device not ready".to_string()),
+    });
+
+    // What the guard does get right: it releases the abandoned read's own marker
+    // and leaves the document the user is looking at untouched.
+    assert_eq!(
+        orch.pending_file_load, None,
+        "the marker for the returned path must be released so a later \
+         re-selection of that path can load again"
+    );
+    assert_eq!(
+        orch.selection.selected_file(),
+        Some(&viewed),
+        "a failure on another path must not clear the user's selection"
+    );
+    assert_eq!(
+        orch.tabs.loaded_path,
+        Some(viewed.clone()),
+        "the document being viewed must stay marked as loaded"
+    );
+    // Pinned: the tab of the unreadable file survives the failure.
+    assert!(
+        orch.tabs.tabs.contains(&failing),
+        "DEFECT: the stale guard returns before the `Err` arm, so the tab for \
+         the unreadable file is never closed"
+    );
+    // Pinned: the read failure is reported nowhere the user can see.
+    assert!(
+        !orch
+            .background_manager
+            .lock()
+            .unwrap()
+            .get_logs()
+            .iter()
+            .any(|entry| entry.message.contains("broken.md")),
+        "DEFECT: an unreadable file fails silently — the failure never reaches \
+         the background log with its cause ([NFR-001])"
+    );
+}
+
+/// DEFECT (pinned, deliberately NOT fixed): when the failing path *is* the
+/// selected file but a different document is loaded, the `Err` arm throws that
+/// document's content away while still claiming it is loaded — and the re-read
+/// guard then makes the loss permanent.
+///
+/// What the code does: once the user selects the unreadable file the stale guard
+/// lets the `Err` arm through, and it clears `current_markdown`, `current_yaml`,
+/// `toc` and both scroll targets unconditionally while leaving `loaded_path`
+/// pointing at the previously loaded document. `handle_file_selection` only
+/// spawns a read when `loaded_path != selected`, so clicking that document again
+/// cannot bring the text back: the centre panel renders the now-empty
+/// `tabs.current_markdown` until the app restarts.
+///
+/// What it should do: either guard the projection the way the `Ok` arm projects it
+/// (only clear when `loaded_path == path`), or clear `loaded_path` together with
+/// the content so the state never names a document it has just discarded.
+#[test]
+fn defect_file_loaded_err_blanks_the_loaded_document_and_keeps_its_loaded_path() {
+    let mut orch = harness();
+    let viewed = PathBuf::from("/lib/viewed.md");
+    let failing = PathBuf::from("/lib/broken.md");
+
+    // `viewed` is the document on screen.
+    orch.tabs.open_tab(viewed.clone());
+    orch.selection.select_file(viewed.clone());
+    orch.tabs.loaded_path = Some(viewed.clone());
+    orch.tabs.current_markdown = "# Viewed\n\nStill here".to_string();
+    orch.tabs.toc = crate::markdown::build_toc(&orch.tabs.current_markdown);
+    orch.tabs.scroll_to_header_id = Some("Viewed".to_string());
+    assert!(
+        !orch.tabs.toc.is_empty(),
+        "the fixture must put a document with headings on screen"
+    );
+
+    // The user then selects `broken`, whose read is in flight.
+    orch.tabs.open_tab(failing.clone());
+    orch.selection.select_file(failing.clone());
+    orch.pending_file_load = Some(failing.clone());
+
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: failing.clone(),
+        content: Err("device not ready".to_string()),
+    });
+
+    // What the `Err` arm does get right for the path it is really about.
+    assert!(
+        !orch.tabs.tabs.contains(&failing),
+        "the failing file's own tab must be closed"
+    );
+    assert_eq!(
+        orch.selection.selected_file(),
+        None,
+        "the file that failed to load must not stay selected"
+    );
+    assert!(
+        orch.background_manager
+            .lock()
+            .unwrap()
+            .get_logs()
+            .iter()
+            .any(|entry| entry.message.contains("broken.md")
+                && entry.message.contains("device not ready")),
+        "the read failure must reach the background log with its cause ([NFR-001])"
+    );
+    // Pinned: the document that was on screen is thrown away...
+    assert!(
+        orch.tabs.current_markdown.is_empty(),
+        "DEFECT: the viewed document's body is wiped although its own read \
+         succeeded"
+    );
+    assert!(
+        orch.tabs.toc.is_empty() && orch.tabs.scroll_to_header_id.is_none(),
+        "DEFECT: its ToC and pending scroll go with it"
+    );
+    // ...while the state still claims it is loaded, which is what makes it stuck.
+    assert_eq!(
+        orch.tabs.loaded_path,
+        Some(viewed),
+        "DEFECT: `loaded_path` still names the wiped document, so \
+         `handle_file_selection` refuses to read it again"
+    );
+}
+
+/// A `Changed` event for some *other* file must not unload the open document,
+/// and a change to the open document while the editor is open must keep it.
+#[test]
+fn apply_file_changed_updated_only_unloads_the_matching_closed_document() {
+    let mut orch = harness();
+    let loaded = PathBuf::from("/lib/open.md");
+    let other = PathBuf::from("/lib/elsewhere.md");
+    orch.tabs.loaded_path = Some(loaded.clone());
+    orch.text_buffer.is_open = false;
+
+    orch.apply_file_changed(FileChanged::updated_one(other));
+    assert_eq!(
+        orch.tabs.loaded_path,
+        Some(loaded.clone()),
+        "a change to an unrelated path must not unload the open document"
+    );
+
+    orch.apply_file_changed(FileChanged::updated_one(loaded.clone()));
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "a change to the open document with the editor closed must unload it"
+    );
+}
+
+/// The UI falling behind the user-command bus drops the stale commands but must
+/// still apply the newest one and keep the reader attached ([FMD-067]).
+#[test]
+fn drain_user_command_bus_survives_a_lagged_reader_and_applies_the_newest_command() {
+    let mut orch = harness();
+    // A one-slot broadcast channel makes the second send overwrite the first,
+    // which is exactly the `Lagged(1)` condition the drain has to survive.
+    let (tx, rx) = tokio::sync::broadcast::channel::<UserCommand>(1);
+    orch.user_command_reader = Some(BusReader::new(rx));
+
+    tx.send(UserCommand::OpenAboutDialog).unwrap();
+    tx.send(UserCommand::OpenToolsDialog).unwrap();
+
+    orch.drain_user_command_bus();
+
+    assert!(
+        !orch.dialogs.about_dialog_open,
+        "the command the UI fell behind on must be dropped, not applied late"
+    );
+    assert!(
+        orch.dialogs.tools_dialog_open,
+        "the newest command must still be applied after the lag"
+    );
+    assert!(
+        orch.user_command_reader.is_some(),
+        "a lag is not a disconnect: the reader must stay attached for the next frame"
+    );
+
+    // The lane keeps working after the lag was reported.
+    tx.send(UserCommand::OpenBatchDialog).unwrap();
+    orch.drain_user_command_bus();
+    assert!(
+        orch.dialogs.batch_dialog_open,
+        "the command lane must still deliver after a lag"
+    );
+}

@@ -11,6 +11,7 @@
 //! 5. **Refusals and teardown.** Disabled and stepless models, stray
 //!    events, and the no-clock determinism check.
 
+use crate::binding::{Cancel, Commit, Live};
 use crate::widget::number_box::StepDirection;
 use crate::widget::number_box_host::{NumberBoxEmission, NumberBoxHost, NumberBoxOutcome};
 use crate::widget::range_model::{RangeKey, RangeModel};
@@ -769,4 +770,233 @@ fn an_outcome_reports_whether_anything_happened() {
             .press_stepper(&model(), StepDirection::Increment)
             .is_noop()
     );
+}
+
+// ---------------------------------------------------------------------------
+// 6. The value semantics of an emission, and the host's own plumbing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_emission_compares_its_payload_within_its_own_tier_only() {
+    let live55 = NumberBoxEmission::Changed(Live::new(55.0));
+    let live60 = NumberBoxEmission::Changed(Live::new(60.0));
+    let commit55 = NumberBoxEmission::Committed(Commit::new(55.0));
+    let cancel55 = NumberBoxEmission::Cancelled(Cancel::new(55.0));
+
+    assert_eq!(
+        live55,
+        NumberBoxEmission::Changed(Live::new(55.0)),
+        "two Live frames carrying the same number are one frame"
+    );
+    assert_eq!(
+        commit55,
+        NumberBoxEmission::Committed(Commit::new(55.0)),
+        "two Commits carrying the same number are one Commit"
+    );
+    assert_eq!(
+        cancel55,
+        NumberBoxEmission::Cancelled(Cancel::new(55.0)),
+        "two Cancels restoring the same number are one Cancel"
+    );
+    assert_ne!(
+        live55, live60,
+        "Live frames carrying different numbers are different frames"
+    );
+    assert_ne!(
+        live55, commit55,
+        "a Live preview of 55 must never compare equal to a Commit of 55"
+    );
+    assert_ne!(
+        commit55, cancel55,
+        "a Commit of 55 must never compare equal to a Cancel restoring 55"
+    );
+    assert_ne!(
+        live55, cancel55,
+        "a Live preview must never compare equal to a Cancel"
+    );
+}
+
+#[test]
+fn an_emission_prints_its_tier_and_its_payload() {
+    assert_eq!(
+        format!("{:?}", NumberBoxEmission::Changed(Live::new(55.0))),
+        "Changed(55.0)",
+        "a Live frame must be readable in a failure message"
+    );
+    assert_eq!(
+        format!("{:?}", NumberBoxEmission::Committed(Commit::new(55.0))),
+        "Committed(55.0)",
+        "a Commit must be readable in a failure message"
+    );
+    assert_eq!(
+        format!("{:?}", NumberBoxEmission::Cancelled(Cancel::new(50.0))),
+        "Cancelled(50.0)",
+        "a Cancel must be readable in a failure message"
+    );
+}
+
+#[test]
+fn a_cancel_is_a_value_change_as_much_as_a_commit_is() {
+    assert!(
+        NumberBoxEmission::Cancelled(Cancel::new(50.0)).is_value_change(),
+        "a Cancel tells the host to write the revert, so it changes the value"
+    );
+    assert!(
+        !NumberBoxEmission::Changed(Live::new(50.0)).is_value_change(),
+        "a Live frame previews only"
+    );
+}
+
+#[test]
+fn a_default_host_is_a_fresh_host() {
+    let host = NumberBoxHost::default();
+    assert!(!host.is_open(), "Default must not start a gesture");
+    assert_eq!(host.steps(), 0);
+    assert_eq!(host.live_ticks(), 0);
+    assert_eq!(host.snapshot(), None);
+    assert_eq!(host.last_tier(), "none");
+    assert!(!host.hovered());
+    assert!(!host.pressed());
+}
+
+#[test]
+fn a_default_outcome_is_a_noop_outcome() {
+    assert!(NumberBoxOutcome::default().is_noop());
+    let settled =
+        NumberBoxOutcome::emissions(vec![NumberBoxEmission::Committed(Commit::new(55.0))]);
+    assert_eq!(
+        settled.clone(),
+        settled,
+        "an outcome must survive a clone unchanged"
+    );
+    assert!(!settled.is_noop());
+}
+
+#[test]
+fn a_cloned_host_owns_its_own_copy_of_the_open_gesture() {
+    let mut host = NumberBoxHost::new();
+    let m = model();
+    host.press_stepper(&m, StepDirection::Increment);
+    host.hover(true);
+
+    let mut copy = host.clone();
+    assert!(copy.is_open(), "the clone carries the open gesture");
+    assert_eq!(copy.snapshot(), Some(50.0), "and the same revert target");
+    assert_eq!(copy.current(), Some(55.0), "and the value the hold reached");
+    assert_eq!(copy.steps(), 1);
+    assert_eq!(copy.live_ticks(), 1);
+    assert_eq!(copy.held_direction(), Some(StepDirection::Increment));
+    assert!(copy.hovered(), "and the pointer state");
+
+    assert_eq!(cancel_value(&copy.cancel()), 50.0, "the clone can settle");
+    assert!(
+        host.is_open(),
+        "settling the clone must not settle the host it came from"
+    );
+    assert_eq!(commit_value(&host.release_stepper(&m)), 55.0);
+}
+
+#[test]
+fn the_live_tier_is_reported_while_a_hold_is_still_running() {
+    let mut host = NumberBoxHost::new();
+    let m = model();
+    host.press_stepper(&m, StepDirection::Increment);
+    assert_eq!(
+        host.last_tier(),
+        "live",
+        "a hold that has emitted frames but not settled reports the live tier"
+    );
+    assert!(!host.settled());
+    assert_eq!(host.live_ticks(), 1);
+}
+
+#[test]
+fn a_hold_on_a_model_that_loses_its_step_names_no_value_and_emits_nothing() {
+    // `step_by` has nothing to add, so `push_live` is handed `None` and the
+    // frame is dropped rather than inventing a value.
+    let mut host = NumberBoxHost::new();
+    let m = model();
+    host.press_stepper(&m, StepDirection::Increment);
+    let before = host.current();
+
+    let out = host.hold_stepper(&continuous(), StepDirection::Increment, 200, 100);
+    assert!(
+        out.is_noop(),
+        "a hold with no step to add cannot name a value, saw {out:?}"
+    );
+    assert_eq!(
+        host.current(),
+        before,
+        "and the value the hold had reached is untouched"
+    );
+    assert_eq!(host.live_ticks(), 1, "only the press ever emitted");
+    assert_eq!(host.steps(), 3, "the crossed intervals are still credited");
+}
+
+#[test]
+fn a_hold_that_has_not_named_a_value_yet_steps_from_the_models_resting_value() {
+    let mut host = NumberBoxHost::new();
+    let m = model();
+    host.press_stepper(&m, StepDirection::Increment);
+    host.current = None;
+
+    let out = host.hold_stepper(&m, StepDirection::Increment, 100, 100);
+    assert_eq!(
+        live_value(&out),
+        55.0,
+        "with no reached value the hold must step from the model, not from nothing"
+    );
+    assert_eq!(host.current(), Some(55.0));
+}
+
+#[test]
+fn a_second_press_while_a_gesture_is_open_keeps_the_outer_snapshot() {
+    // Nesting rule: outermost wins. Re-capturing on the inner press would
+    // silently shorten the revert to a value the user never agreed to.
+    let mut host = NumberBoxHost::new();
+    let at_fifty = model();
+    let at_seventy = RangeModel::new(70.0, 0.0, 100.0).with_step(Some(5.0));
+
+    host.press_stepper(&at_fifty, StepDirection::Increment);
+    assert_eq!(host.snapshot(), Some(50.0), "the first press captures 50");
+
+    host.press_stepper(&at_seventy, StepDirection::Decrement);
+    assert_eq!(
+        host.snapshot(),
+        Some(50.0),
+        "a second press must not re-capture the snapshot under the open gesture"
+    );
+    assert_eq!(
+        host.held_direction(),
+        Some(StepDirection::Decrement),
+        "the newer press is the button that is down now"
+    );
+    assert_eq!(host.steps(), 1, "and its press is step one again");
+    assert_eq!(
+        cancel_value(&host.cancel()),
+        50.0,
+        "so Escape reverts to before the very first press"
+    );
+}
+
+#[test]
+fn a_release_with_the_gesture_already_taken_away_says_nothing() {
+    // The hold is still down but there is no gesture left to settle: the
+    // release must clear the input without inventing a Commit.
+    let mut host = NumberBoxHost::new();
+    let m = model();
+    host.press_stepper(&m, StepDirection::Increment);
+    host.gesture.abort();
+
+    let out = host.release_stepper(&m);
+    assert!(
+        out.is_noop(),
+        "a release with no gesture to settle must emit nothing, saw {out:?}"
+    );
+    assert!(
+        !host.committed(),
+        "and it must not claim a settle that never happened"
+    );
+    assert_eq!(host.held_direction(), None, "the hold is still cleared");
+    assert!(!host.pressed());
 }

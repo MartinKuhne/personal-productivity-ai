@@ -5576,3 +5576,559 @@ fn test_a_close_request_defers_the_debug_toggle_for_the_debug_card() {
         "a card that was never opened must not be conjured by the other card's close"
     );
 }
+// ───────────────────────── tooltip hover / focus arms ─────────────────────────
+//
+// `UIF-ATOM-007`: each tooltip-bearing control owns a `HoverController`, and
+// the reducer is the only writer of `active_tooltip`. The arms below are pure
+// state transitions, so every assertion is timing-independent even though the
+// reducer stamps its own clock internally.
+
+#[test]
+fn test_tooltip_hover_enter_activates_the_entered_control() {
+    let (mut state, _storage) = fresh_state();
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip, None,
+        "a fresh frame shows no tooltip"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::SearchTrigger,
+            tooltip_text: None,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::SearchTrigger),
+        "hovering the search trigger must make it the active tooltip"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::SearchClear,
+            tooltip_text: None,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::SearchClear),
+        "hovering a second control moves the active tooltip instead of stacking"
+    );
+}
+
+/// The tools-error tooltip carries text that only the view knows, so it rides
+/// in on the enter message — and an enter without text must not blank it.
+#[test]
+fn test_tooltip_hover_enter_stores_tools_error_text_only_when_supplied() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: Some("MCP server unreachable".to_string()),
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::ToolsError),
+        "the error marker is the active tooltip while hovered"
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip.as_deref(),
+        Some("MCP server unreachable"),
+        "the error text must be stored so the overlay can render it"
+    );
+
+    state.overlay.tooltip.active_tooltip = None;
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: None,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip.as_deref(),
+        Some("MCP server unreachable"),
+        "an enter without text keeps the text already on screen"
+    );
+}
+
+#[test]
+fn test_tooltip_hover_exit_clears_only_the_active_control() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::SearchTrigger,
+            tooltip_text: None,
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::SearchTrigger,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip, None,
+        "leaving the hovered control hides its tooltip"
+    );
+
+    // A stale exit for a *different* control must not hide what is showing.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::SearchClear,
+            tooltip_text: None,
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::SearchTrigger,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::SearchClear),
+        "an exit for a control that is not active must leave the visible tooltip alone"
+    );
+}
+
+/// Leaving the tools-error marker drops both its text and its anchor, so a
+/// re-entry cannot render the previous marker's message at the old position.
+#[test]
+fn test_tooltip_hover_exit_of_the_tools_error_drops_its_text_and_anchor() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: Some("row failed".to_string()),
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip.as_deref(),
+        Some("row failed")
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::ToolsError,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip, None,
+        "the error marker's tooltip is hidden on exit"
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip, None,
+        "the error text must not outlive the marker it belongs to"
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_anchor, None,
+        "the anchor must not outlive the marker it points at"
+    );
+}
+
+/// Keyboard focus drives the same active-tooltip state as the pointer, so a
+/// keyboard-only user sees the same help text.
+#[test]
+fn test_tooltip_focus_enter_and_exit_mirror_the_hover_behaviour() {
+    let (mut state, _storage) = fresh_state();
+
+    for (id, other) in [
+        (TooltipId::SearchTrigger, TooltipId::SearchClear),
+        (TooltipId::SearchClear, TooltipId::SearchTrigger),
+    ] {
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusEnter {
+                id,
+                tooltip_text: None,
+            }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip,
+            Some(id),
+            "focusing {id:?} must activate its tooltip"
+        );
+
+        // Focus loss for another control leaves the focused one visible.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusExit { id: other }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip,
+            Some(id),
+            "a focus exit for {other:?} must not hide the {id:?} tooltip"
+        );
+
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusExit { id }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip, None,
+            "losing focus of {id:?} hides its tooltip"
+        );
+    }
+}
+
+#[test]
+fn test_tooltip_focus_enter_stores_the_tools_error_text() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipFocusEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: Some("auth token expired".to_string()),
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::ToolsError),
+        "focusing the error marker activates it"
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip.as_deref(),
+        Some("auth token expired"),
+        "the keyboard path must carry the same text as the pointer path"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipFocusExit {
+            id: TooltipId::ToolsError,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip, None,
+        "the focus exit clears the text just like the pointer exit"
+    );
+}
+
+// ───────────────────────── menu / inbound arms ─────────────────────────
+
+/// An ignored menu interaction is the framework's "nothing happened" signal:
+/// the reducer must neither schedule work nor publish an intent ([FMD-068]).
+#[test]
+fn test_menu_interaction_ignored_schedules_nothing() {
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+
+    let task = update(&mut state, Message::Menu(MenuMessage::InteractionIgnored));
+
+    assert_eq!(
+        task.units(),
+        0,
+        "an ignored interaction must schedule no command"
+    );
+    assert!(
+        drained(&spy).is_empty(),
+        "an ignored interaction must publish no user command"
+    );
+}
+
+/// A coalesced burst of file changes applies every event and drains the
+/// workspace once, so a storm costs one tree rebuild ([FMD-066]).
+#[test]
+fn test_inbound_file_changed_batch_applies_every_event() {
+    let (mut state, _storage) = fresh_state();
+    // Populate the tree cache first so the frame tail's re-derivation is
+    // observable (the same setup `test_config_arrival_projects_onto_the_
+    // orchestrator_and_the_agent` uses).
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let before = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail populated the tree cache");
+    let indexed_before = state.app.workspace_tree_cache.indexed_file_count;
+    state.app.orchestrator.selection.tree_dirty = false;
+    let first = PathBuf::from("/workspace/first.md");
+    let second = PathBuf::from("/workspace/second.md");
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::FileChangedBatch(vec![
+            crate::bus::events::FileChanged::discovered_one(first.clone()),
+            crate::bus::events::FileChanged::discovered_one(second.clone()),
+        ])),
+    );
+
+    assert!(
+        state.app.orchestrator.workspace.all_files.contains(&first),
+        "the first discovered file of the burst must be tracked"
+    );
+    assert!(
+        state.app.orchestrator.workspace.all_files.contains(&second),
+        "the second discovered file of the burst must be tracked too"
+    );
+    // The burst marks the tree dirty and `finish_frame` re-derives the rows
+    // inside the SAME reduction, so the whole burst costs one rebuild. The
+    // observable end state is therefore a NEW cache with the flag already
+    // consumed — `tree_dirty` is an internal transition the view never sees
+    // (compare `test_a_dirty_tree_is_re_derived_rather_than_served_from_the_stale_cache`).
+    let after = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail re-derived the tree cache");
+    assert!(
+        !Arc::ptr_eq(&before, &after),
+        "the burst must invalidate the flattened tree rows"
+    );
+    assert!(
+        !state.app.orchestrator.selection.tree_dirty,
+        "the frame tail must consume the dirty flag the burst set"
+    );
+    assert_eq!(
+        state.app.workspace_tree_cache.indexed_file_count,
+        state.app.orchestrator.workspace.all_files.len(),
+        "the tree cache must have caught up with the workspace in that one pass"
+    );
+    assert_eq!(
+        state.app.workspace_tree_cache.indexed_file_count,
+        indexed_before + 2,
+        "one rebuild must index both discovered files of the burst"
+    );
+}
+
+/// Directory bursts behave the same way, for both the single and the batched
+/// arm.
+#[test]
+fn test_inbound_directory_changed_arms_apply_every_event() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let before = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail populated the tree cache");
+    state.app.orchestrator.selection.tree_dirty = false;
+    let single = PathBuf::from("/workspace/single-dir");
+    let first = PathBuf::from("/workspace/batch-dir-a");
+    let second = PathBuf::from("/workspace/batch-dir-b");
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::DirectoryChanged(
+            crate::bus::events::DirectoryChanged {
+                path: single.clone(),
+                kind: crate::bus::events::DirectoryChangedKind::Added,
+            },
+        )),
+    );
+    assert!(
+        state.app.orchestrator.workspace.all_dirs.contains(&single),
+        "a lone directory change must be projected into the workspace"
+    );
+    let after_single = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail re-derived the tree cache");
+    assert!(
+        !Arc::ptr_eq(&before, &after_single),
+        "a lone directory change must invalidate the flattened tree rows"
+    );
+    assert!(
+        !state.app.orchestrator.selection.tree_dirty,
+        "the frame tail must consume the dirty flag the directory arm set"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::DirectoryChangedBatch(vec![
+            crate::bus::events::DirectoryChanged {
+                path: first.clone(),
+                kind: crate::bus::events::DirectoryChangedKind::Added,
+            },
+            crate::bus::events::DirectoryChanged {
+                path: second.clone(),
+                kind: crate::bus::events::DirectoryChangedKind::Added,
+            },
+        ])),
+    );
+
+    assert!(
+        state.app.orchestrator.workspace.all_dirs.contains(&first),
+        "the first directory of the burst must be projected"
+    );
+    assert!(
+        state.app.orchestrator.workspace.all_dirs.contains(&second),
+        "the second directory of the burst must be projected"
+    );
+    // Same frame-tail contract as the file batch: the burst marks the tree
+    // dirty and `finish_frame` re-derives the rows in the same reduction, so
+    // what is observable afterwards is a NEW cache and a cleared flag.
+    let after_batch = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail re-derived the tree cache");
+    assert!(
+        !Arc::ptr_eq(&after_single, &after_batch),
+        "a burst of directory changes must invalidate the flattened tree rows"
+    );
+    assert!(
+        !state.app.orchestrator.selection.tree_dirty,
+        "directory changes mark the tree dirty and the frame tail consumes the flag"
+    );
+    assert_eq!(
+        state.app.workspace_tree_cache.indexed_dir_count,
+        state.app.orchestrator.workspace.all_dirs.len(),
+        "one rebuild must index every directory the burst projected"
+    );
+}
+
+/// Both agent arms hand the whole burst to one bus drain, so nothing is left
+/// queued behind the message that woke the reducer.
+#[test]
+fn test_inbound_agent_arms_drain_the_agent_event_bus() {
+    let (mut state, _storage) = fresh_state();
+    let session_id = uuid::Uuid::new_v4();
+    let first = crate::bus::events::AgentEvent::Thinking {
+        session_id,
+        text: "step one".to_string(),
+    };
+    let second = crate::bus::events::AgentEvent::Thinking {
+        session_id,
+        text: "step two".to_string(),
+    };
+    // `publish` takes the event by value, so each event is cloned into the bus
+    // and kept here for the arm that replays it below.
+    state
+        .app
+        .orchestrator
+        .agent_event_bus
+        .publish(first.clone());
+    state
+        .app
+        .orchestrator
+        .agent_event_bus
+        .publish(second.clone());
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Agent(std::sync::Arc::new(second))),
+    );
+
+    let reader = state
+        .app
+        .orchestrator
+        .agent_event_reader
+        .as_mut()
+        .expect("the harness wires an agent event reader");
+    assert!(
+        reader.try_recv().is_err(),
+        "the agent arm must drain the bus instead of leaving events queued"
+    );
+
+    // The batch arm drains the same single reader.
+    state
+        .app
+        .orchestrator
+        .agent_event_bus
+        .publish(first.clone());
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::AgentBatch(vec![std::sync::Arc::new(first)])),
+    );
+    let reader = state
+        .app
+        .orchestrator
+        .agent_event_reader
+        .as_mut()
+        .expect("the harness wires an agent event reader");
+    assert!(
+        reader.try_recv().is_err(),
+        "the batched agent arm must drain the bus as well"
+    );
+}
+
+/// A coalesced background burst applies every event, not just the first.
+#[test]
+fn test_inbound_background_batch_applies_every_event() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let before = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail populated the tree cache");
+    let indexed_before = state.app.workspace_tree_cache.indexed_file_count;
+    state.app.orchestrator.selection.tree_dirty = false;
+    let first = PathBuf::from("/workspace/parsed-one.md");
+    let second = PathBuf::from("/workspace/parsed-two.md");
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::BackgroundBatch(vec![
+            std::sync::Arc::new(BackgroundEvent::Fs(FsEvent::FileParsed {
+                path: first.clone(),
+                tags: vec!["one".to_string()],
+            })),
+            std::sync::Arc::new(BackgroundEvent::Fs(FsEvent::FileParsed {
+                path: second.clone(),
+                tags: vec!["two".to_string()],
+            })),
+        ])),
+    );
+
+    assert!(
+        state.app.orchestrator.workspace.all_files.contains(&first),
+        "the first parsed file of the burst must reach the workspace"
+    );
+    assert!(
+        state.app.orchestrator.workspace.all_files.contains(&second),
+        "the second parsed file of the burst must reach the workspace as well"
+    );
+    // `handle_fs_event` marks the tree dirty for every `FileParsed`, and
+    // `finish_frame` re-derives the rows in the same reduction — so the burst
+    // costs one rebuild and the observable end state is a NEW cache with the
+    // flag consumed, not a lingering `tree_dirty` the view could read.
+    let after = state
+        .app
+        .cached_tree_rows
+        .clone()
+        .expect("the frame tail re-derived the tree cache");
+    assert!(
+        !Arc::ptr_eq(&before, &after),
+        "background progress must invalidate the flattened tree rows"
+    );
+    assert!(
+        !state.app.orchestrator.selection.tree_dirty,
+        "the frame tail must consume the dirty flag the background burst set"
+    );
+    assert_eq!(
+        state.app.workspace_tree_cache.indexed_file_count,
+        indexed_before + 2,
+        "one rebuild must index both parsed files of the burst"
+    );
+}

@@ -1559,3 +1559,806 @@ fn test_widget_layout_uses_model_width_and_offered_height() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// 10. Model edges: page keys, stale selections, disabled edges
+// ---------------------------------------------------------------------------
+
+#[test]
+fn page_keys_rove_the_same_ring_as_the_arrows() {
+    // (case label, page key, expected landing, why — every case roves from `selected = Files`)
+    let cases = [
+        (
+            "PageDown",
+            RangeKey::PageDown,
+            PaneId::Search,
+            "PageDown must step forward onto the next enabled destination",
+        ),
+        (
+            "PageUp",
+            RangeKey::PageUp,
+            PaneId::Help,
+            "PageUp must step backward and wrap, exactly like ArrowUp",
+        ),
+    ];
+
+    for (label, key, expected, why) in cases {
+        let (top, bottom) = sample_items();
+        let model = NavigationRailModel::new(top, bottom, PaneId::Files);
+        assert_eq!(model.rove(key), Some(expected), "[{label}] {why}");
+    }
+}
+
+#[test]
+fn roving_off_a_disabled_or_removed_selection_re_enters_at_the_travelled_end() {
+    // 1. The selection stands on `Debug`, which is disabled: it is not in the
+    //    enabled ring, so the walk starts from the ring position its index
+    //    inserts at and steps from there.
+    let (top, bottom) = sample_items();
+    let model = NavigationRailModel::new(top, bottom, PaneId::Debug);
+    assert_eq!(
+        model.rove(RangeKey::Increase),
+        Some(PaneId::Help),
+        "forward from the disabled `Debug` starts at the insertion point the live \
+         ring gives it (`Settings`, the member that replaced it) and then takes the \
+         step, so it lands one live member past that — the same two-hop answer \
+         `rove_index` pins for every roving group"
+    );
+    assert_eq!(
+        model.rove(RangeKey::Decrease),
+        Some(PaneId::SourceControl),
+        "backward from the disabled `Debug` lands on the live member before it, \
+         because the insertion point already sits past the dead index"
+    );
+
+    // 2. The selection has left the list entirely: there is no position to walk
+    //    from, so the direction of travel alone decides the entry point.
+    let top = vec![
+        NavDestination::new(PaneId::Files, "Files", Icon::new("📁")),
+        NavDestination::new(PaneId::Search, "Search", Icon::new("🔍")),
+    ];
+    let bottom = vec![NavDestination::new(
+        PaneId::Settings,
+        "Settings",
+        Icon::new("⚙"),
+    )];
+    let model = NavigationRailModel::new(top, bottom, PaneId::Debug);
+    assert_eq!(
+        model.rove(RangeKey::Increase),
+        Some(PaneId::Files),
+        "forward from a selection that no longer exists must enter at the first member"
+    );
+    assert_eq!(
+        model.rove(RangeKey::Decrease),
+        Some(PaneId::Settings),
+        "backward from a selection that no longer exists must enter at the last member"
+    );
+}
+
+#[test]
+fn home_and_end_land_on_the_first_and_last_live_members_not_the_ends_of_the_list() {
+    let top = vec![
+        NavDestination::new(PaneId::Files, "Files", Icon::new("📁")).with_disabled(true),
+        NavDestination::new(PaneId::Search, "Search", Icon::new("🔍")),
+        NavDestination::new(PaneId::Debug, "Debug", Icon::new("🐞")).with_disabled(true),
+    ];
+    let bottom = vec![
+        NavDestination::new(PaneId::Settings, "Settings", Icon::new("⚙")),
+        NavDestination::new(PaneId::Help, "Help", Icon::new("❓")).with_disabled(true),
+    ];
+    let model = NavigationRailModel::new(top, bottom, PaneId::Search);
+
+    assert_eq!(
+        model.enabled_destinations(),
+        vec![PaneId::Search, PaneId::Settings],
+        "only the two live members are rovable"
+    );
+    assert_eq!(
+        model.rove(RangeKey::Home),
+        Some(PaneId::Search),
+        "Home must step over the disabled first row to the first live member"
+    );
+    assert_eq!(
+        model.rove(RangeKey::End),
+        Some(PaneId::Settings),
+        "End must step over the disabled last row to the last live member"
+    );
+}
+
+#[test]
+fn a_width_written_behind_the_builder_is_still_clamped_at_layout_time() {
+    let (top, bottom) = sample_items();
+    let mut model = NavigationRailModel::new(top, bottom, PaneId::Files);
+
+    model.expanded_width = 900.0;
+    assert_eq!(
+        model.current_width(),
+        EXPANDED_MAX_WIDTH,
+        "`current_width` must re-clamp a width assigned straight to the field"
+    );
+
+    model.expanded_width = 12.0;
+    assert_eq!(
+        model.current_width(),
+        EXPANDED_MIN_WIDTH,
+        "the same guard must hold at the bottom of the range"
+    );
+
+    model.expanded = false;
+    assert_eq!(
+        model.current_width(),
+        COMPACT_WIDTH,
+        "a compact rail ignores the stored expanded width entirely"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 11. Pointer edges: compact right edge, dead zones, pinned rows
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_compact_rails_right_edge_is_a_destination_not_a_resize_handle() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::new(
+        NavigationRailModel::new(top, bottom, PaneId::Files).with_expanded(false),
+        Rectangle::new(Point::ORIGIN, Size::new(COMPACT_WIDTH, 400.0)),
+    );
+
+    // The same x that is a grab band when expanded is list content here.
+    let captured = driver.press(Point::new(COMPACT_WIDTH - 1.0, 100.0));
+    assert!(
+        captured,
+        "a compact rail must treat its right edge as list content"
+    );
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::Select(PaneId::Search)],
+        "the press must select the destination under it"
+    );
+    assert!(
+        !driver.state().resize.is_active(),
+        "a compact rail must not open a resize gesture"
+    );
+    assert!(
+        !driver.state().is_hovered_grab,
+        "a compact rail has no grab band to hover"
+    );
+}
+
+#[test]
+fn a_press_on_the_divider_or_the_header_gap_claims_nothing() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::expanded(NavigationRailModel::new(top, bottom, PaneId::Files));
+
+    // The hairline between the list and the pinned section sits at 327..328px.
+    assert!(
+        !driver.press(Point::new(50.0, 327.5)),
+        "the divider is not a target"
+    );
+    // The header row, but outside the 28px toggle button.
+    assert!(
+        !driver.press(Point::new(150.0, 18.0)),
+        "the header row outside the toggle is not a target"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "an unclaimed press must emit nothing"
+    );
+    assert!(
+        !driver.state().is_focused(),
+        "an unclaimed press must not take focus for the rail"
+    );
+}
+
+#[test]
+fn a_press_on_a_pinned_destination_indexes_it_after_the_middle_rows() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::expanded(NavigationRailModel::new(top, bottom, PaneId::Files));
+
+    // `Settings` is the first pinned row: 328..364px of a 400px rail.
+    assert!(
+        driver.press(Point::new(50.0, 340.0)),
+        "a pinned destination must answer a press"
+    );
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::Select(PaneId::Settings)],
+        "the pinned row must commit its own destination"
+    );
+    assert_eq!(
+        driver.state().focused_dest,
+        Some(PaneId::Settings),
+        "the pinned row takes the roving focus like any other"
+    );
+
+    let (index, dest) = driver
+        .widget
+        .hit_destination(driver.bounds, Point::new(50.0, 340.0), 0.0)
+        .expect("the first pinned row must answer the hit test");
+    assert_eq!(
+        index, 4,
+        "pinned rows are indexed in the flat roster, after the four middle rows"
+    );
+    assert_eq!(dest.id, PaneId::Settings);
+}
+
+// ---------------------------------------------------------------------------
+// 12. Callback-less and nothing-to-do paths
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_focused_rail_with_nothing_enabled_leaves_the_arrow_key_unclaimed() {
+    let top =
+        vec![NavDestination::new(PaneId::Files, "Files", Icon::new("📁")).with_disabled(true)];
+    let bottom =
+        vec![NavDestination::new(PaneId::Settings, "Settings", Icon::new("⚙")).with_disabled(true)];
+    let mut driver = RailDriver::expanded(NavigationRailModel::new(top, bottom, PaneId::Files));
+
+    let state = driver
+        .tree
+        .state
+        .downcast_mut::<NavigationRailState<PaneId>>();
+    operation::Focusable::focus(&mut state.focusable);
+
+    assert!(
+        !driver.key(Named::ArrowDown),
+        "with every destination disabled there is nowhere to rove, so the arrow must pass through"
+    );
+    assert_eq!(
+        driver.state().focused_dest,
+        None,
+        "no landing means no focus move"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "an unclaimed arrow must emit nothing"
+    );
+}
+
+#[test]
+fn activation_on_a_rail_with_no_select_callback_still_eats_the_key() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::with_widget(
+        navigation_rail(NavigationRailModel::new(top, bottom, PaneId::Files)),
+        Rectangle::new(Point::ORIGIN, Size::new(220.0, 400.0)),
+    );
+
+    let state = driver
+        .tree
+        .state
+        .downcast_mut::<NavigationRailState<PaneId>>();
+    operation::Focusable::focus(&mut state.focusable);
+
+    assert!(
+        driver.key(Named::Enter),
+        "Enter is bound to activation, so even a rail with no host to notify claims it"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "claiming the key must not invent a message"
+    );
+}
+
+#[test]
+fn an_unwired_resize_still_tracks_reverts_and_closes() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::with_widget(
+        navigation_rail(NavigationRailModel::new(top, bottom, PaneId::Files)),
+        Rectangle::new(Point::ORIGIN, Size::new(220.0, 400.0)),
+    );
+
+    assert!(
+        driver.press(Point::new(220.0, 200.0)),
+        "the grab press opens the gesture whether or not a host is listening"
+    );
+    assert!(driver.state().resize.is_active());
+
+    assert!(
+        driver.hover(Point::new(280.0, 200.0)),
+        "the drag must still be claimed with no live callback attached"
+    );
+    assert_eq!(
+        driver.state().resize.current_width(),
+        280.0,
+        "the gesture must keep tracking the pointer even when nobody is listening"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "no callbacks attached means no messages"
+    );
+
+    assert!(
+        driver.key(Named::Escape),
+        "Escape must still claim and close the gesture"
+    );
+    assert!(!driver.state().resize.is_active(), "the slot must close");
+    assert_eq!(
+        driver.state().resize.current_width(),
+        EXPANDED_DEFAULT_WIDTH,
+        "the width must revert to the pre-drag snapshot even with no cancel callback"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "a revert nobody listens to still emits nothing"
+    );
+}
+
+#[test]
+fn a_release_with_no_commit_callback_still_consumes_the_gesture() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::with_widget(
+        navigation_rail(NavigationRailModel::new(top, bottom, PaneId::Files)),
+        Rectangle::new(Point::ORIGIN, Size::new(220.0, 400.0)),
+    );
+
+    assert!(driver.press(Point::new(220.0, 200.0)));
+    assert!(
+        driver.release(Point::new(220.0, 200.0)),
+        "the release must be claimed and the guard consumed"
+    );
+    assert!(
+        !driver.state().resize.is_active(),
+        "the gesture must be closed by the release"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "a settled gesture with no commit callback emits nothing"
+    );
+
+    assert!(
+        !driver.release(Point::new(220.0, 200.0)),
+        "a second release has no gesture left to close"
+    );
+}
+
+#[test]
+fn a_closed_gesture_owes_no_second_commit_and_no_cancel() {
+    let mut resize = NavRailResize::new();
+    assert_eq!(
+        resize.begin(EXPANDED_DEFAULT_WIDTH, 0.0),
+        GestureStart::Started,
+        "an idle gesture must open"
+    );
+    assert!(
+        resize.update(260.0).is_some(),
+        "a live tick must pass through the open gesture"
+    );
+    assert!(
+        resize.commit().is_some(),
+        "the first commit must settle the width"
+    );
+    assert!(
+        resize.commit().is_none(),
+        "the guard is consumed: a second commit must report nothing"
+    );
+    assert!(
+        resize.cancel().is_none(),
+        "a settled gesture cannot be cancelled after the fact"
+    );
+    assert!(!resize.is_active(), "the slot must stay closed");
+}
+
+#[test]
+fn a_wheel_event_in_a_list_that_fits_is_claimed_but_cannot_scroll() {
+    let (top, bottom) = sample_items();
+    let mut driver = RailDriver::expanded(NavigationRailModel::new(top, bottom, PaneId::Files));
+    // 144px of rows inside a 291px band: there is nothing to scroll.
+
+    assert!(
+        driver.scroll_pixels(Point::new(50.0, 100.0), -30.0),
+        "the wheel over the list is claimed even when the list fits"
+    );
+    assert_eq!(
+        driver.state().scroll_offset,
+        0.0,
+        "a list shorter than its band must not scroll"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 13. Compact cursor regions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_compact_rails_cursor_tracks_its_regions() {
+    let (top, bottom) = sample_items();
+    let driver = RailDriver::new(
+        NavigationRailModel::new(top, bottom, PaneId::Files).with_expanded(false),
+        Rectangle::new(Point::ORIGIN, Size::new(COMPACT_WIDTH, 400.0)),
+    );
+
+    // (case label, cursor, expected interaction)
+    let cases = [
+        (
+            "toggle button",
+            Point::new(24.0, 18.0),
+            mouse::Interaction::Pointer,
+        ),
+        (
+            "enabled destination",
+            Point::new(24.0, 50.0),
+            mouse::Interaction::Pointer,
+        ),
+        (
+            "disabled destination",
+            Point::new(24.0, 150.0),
+            mouse::Interaction::Idle,
+        ),
+        (
+            "pinned destination",
+            Point::new(24.0, 340.0),
+            mouse::Interaction::Pointer,
+        ),
+        (
+            "header gap beside the toggle",
+            Point::new(46.0, 18.0),
+            mouse::Interaction::Idle,
+        ),
+        (
+            "divider band",
+            Point::new(24.0, 327.5),
+            mouse::Interaction::Idle,
+        ),
+    ];
+
+    for (label, at, expected) in cases {
+        assert_eq!(
+            driver.interaction(at),
+            expected,
+            "[{label}] wrong cursor at {at:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 14. Paint legs
+// ---------------------------------------------------------------------------
+
+use crate::test_helpers::{
+    Capture, MIN_CHANGED_PIXELS, SURFACE_TOLERANCE, assert_repainted, moved, pressed, to_rgb,
+};
+
+/// The box every paint leg rasterises into: an expanded 220x400 rail.
+const RAIL_VIEWPORT: Size = Size::new(220.0, 400.0);
+
+/// A rail element with no host callbacks: the paint legs assert about state
+/// and pixels, never about messages.
+fn paintable(model: NavigationRailModel<PaneId>) -> Element<'static, TestMsg> {
+    navigation_rail(model).into()
+}
+
+/// The rect of the `index`th middle row of an unscrolled rail.
+fn middle_row(index: usize) -> Rectangle {
+    Rectangle::new(
+        Point::new(0.0, ROW_HEIGHT * (index as f32 + 1.0)),
+        Size::new(220.0, ROW_HEIGHT),
+    )
+}
+
+/// Assert a sampled pixel matches `expected` within [`SURFACE_TOLERANCE`].
+fn assert_rgb(actual: [u8; 3], expected: [u8; 3], what: &str) {
+    let off = actual
+        .iter()
+        .zip(expected)
+        .map(|(got, want)| (*got as i32 - i32::from(want)).abs())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        off <= i32::from(SURFACE_TOLERANCE),
+        "{what}: sampled {actual:?}, expected {expected:?} (off by {off})"
+    );
+}
+
+#[test]
+fn the_selected_row_paints_a_fill_and_a_leading_indicator_bar() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let (top, bottom) = sample_items();
+    // `SourceControl` (row 2) is selected and carries no badge, so the right
+    // half of its row is pure fill.
+    let frame = capture.frame(
+        RAIL_VIEWPORT,
+        paintable(NavigationRailModel::new(top, bottom, PaneId::SourceControl)),
+    );
+
+    assert_rgb(
+        frame.pixel(1.0, middle_row(2).center_y()),
+        to_rgb(palette.accent_border),
+        "the selected row must carry the accent indicator bar along its left edge",
+    );
+    assert_rgb(
+        frame.pixel(150.0, middle_row(2).center_y()),
+        to_rgb(palette.surface_active),
+        "the selected row must be filled with the active surface",
+    );
+    assert_rgb(
+        frame.pixel(150.0, middle_row(3).center_y()),
+        to_rgb(palette.surface_raised),
+        "an unselected row must keep the rail's own surface",
+    );
+}
+
+#[test]
+fn hovering_an_enabled_row_fills_it_and_hovering_a_disabled_one_does_not() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let model = || {
+        let (top, bottom) = sample_items();
+        NavigationRailModel::new(top, bottom, PaneId::Files)
+    };
+    let plain = capture.frame(RAIL_VIEWPORT, paintable(model()));
+
+    // Row 2 (`SourceControl`) is enabled and unselected.
+    let over_enabled = Point::new(150.0, middle_row(2).center_y());
+    let hovered = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(over_enabled)],
+        mouse::Cursor::Available(over_enabled),
+    );
+    assert_repainted(
+        &plain,
+        &hovered,
+        middle_row(2),
+        "hovering an enabled destination",
+    );
+    assert_rgb(
+        hovered.pixel(150.0, middle_row(2).center_y()),
+        to_rgb(palette.surface_hover),
+        "a hovered enabled row must carry the hover surface",
+    );
+
+    // Row 3 (`Debug`) is disabled: the hover branch refuses it outright.
+    let over_disabled = Point::new(150.0, middle_row(3).center_y());
+    let hovered_disabled = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(over_disabled)],
+        mouse::Cursor::Available(over_disabled),
+    );
+    assert_eq!(
+        hovered_disabled.differing_pixels(&plain, middle_row(3)),
+        0,
+        "a disabled destination must not light up under the pointer"
+    );
+}
+
+#[test]
+fn a_keyboard_focused_row_gains_a_ring_on_top_of_its_hover_fill() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let model = || {
+        let (top, bottom) = sample_items();
+        NavigationRailModel::new(top, bottom, PaneId::Files)
+    };
+    let row = middle_row(2);
+    let at = Point::new(150.0, row.center_y());
+    let cursor = mouse::Cursor::Available(at);
+
+    let plain = capture.frame(RAIL_VIEWPORT, paintable(model()));
+    let hovered = capture.frame_after_at(RAIL_VIEWPORT, paintable(model()), &[moved(at)], cursor);
+    let focused = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(at), pressed()],
+        cursor,
+    );
+
+    assert_repainted(&plain, &hovered, row, "the hover fill");
+    assert_repainted(
+        &hovered,
+        &focused,
+        row,
+        "the focus ring, which arrives on top of the hover fill",
+    );
+    assert_rgb(
+        focused.pixel(150.0, row.y + 1.0),
+        to_rgb(palette.accent_border),
+        "the focus ring must be stroked along the inside edge of the row",
+    );
+    assert_rgb(
+        focused.pixel(150.0, row.center_y()),
+        to_rgb(palette.surface_hover),
+        "focus paints a ring, not a fill: the middle of the row keeps the hover surface",
+    );
+}
+
+#[test]
+fn the_pinned_section_is_divided_only_when_it_exists() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let (top, bottom) = sample_items();
+
+    let pinned = capture.frame(
+        RAIL_VIEWPORT,
+        paintable(NavigationRailModel::new(top.clone(), bottom, PaneId::Files)),
+    );
+    assert_rgb(
+        pinned.pixel(110.0, 327.5),
+        to_rgb(palette.border_subtle),
+        "the pinned section must be separated by a hairline divider",
+    );
+    assert_rgb(
+        pinned.pixel(110.0, 326.0),
+        to_rgb(palette.surface_raised),
+        "the line of pixels just above the divider must stay the rail's own surface",
+    );
+
+    let unpinned = capture.frame(
+        RAIL_VIEWPORT,
+        paintable(NavigationRailModel::new(top, Vec::new(), PaneId::Files)),
+    );
+    assert_rgb(
+        unpinned.pixel(110.0, 399.5),
+        to_rgb(palette.surface_raised),
+        "with nothing pinned there is no divider to paint at the foot of the rail",
+    );
+}
+
+#[test]
+fn the_right_edge_promotes_to_the_accent_only_while_the_grab_is_hot() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let model = || {
+        let (top, bottom) = sample_items();
+        NavigationRailModel::new(top, bottom, PaneId::Files)
+    };
+    let edge = Point::new(219.5, 200.0);
+    let grab = Point::new(219.0, 200.0);
+
+    let resting = capture.frame(RAIL_VIEWPORT, paintable(model()));
+    assert_rgb(
+        resting.pixel(edge.x, edge.y),
+        to_rgb(palette.border_subtle),
+        "the resting right edge is a subtle hairline",
+    );
+
+    let hovered = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(grab)],
+        mouse::Cursor::Available(grab),
+    );
+    assert_rgb(
+        hovered.pixel(edge.x, edge.y),
+        to_rgb(palette.accent_border),
+        "hovering the grab band must promote the edge to the accent",
+    );
+
+    let dragging = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(grab), pressed()],
+        mouse::Cursor::Available(grab),
+    );
+    assert_rgb(
+        dragging.pixel(edge.x, edge.y),
+        to_rgb(palette.accent_border),
+        "an open resize must keep the edge promoted",
+    );
+}
+
+#[test]
+fn the_toggle_button_fills_only_under_the_pointer() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let model = || {
+        let (top, bottom) = sample_items();
+        NavigationRailModel::new(top, bottom, PaneId::Files)
+    };
+    let toggle = Rectangle::new(Point::new(10.0, 4.0), Size::new(TOGGLE_SIZE, TOGGLE_SIZE));
+    let at = toggle.center();
+
+    let plain = capture.frame(RAIL_VIEWPORT, paintable(model()));
+    // The pointer has to arrive as a `CursorMoved`: `Capture` rasterises every
+    // frame with its own cursor unavailable, so the only hover a captured frame
+    // can ever show is one the widget recorded in its own state — here
+    // `is_hovered_toggle`, which `update` sets from the cursor it was handed.
+    let over = capture.frame_after_at(
+        RAIL_VIEWPORT,
+        paintable(model()),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
+
+    assert_repainted(&plain, &over, toggle, "the toggle hover fill");
+    // The glyph is drawn dead centre of the button, so the centre pixel is ink
+    // rather than surface; the fill is sampled in the band between the button's
+    // top edge and the `ICON_SIZE` glyph box it wraps.
+    assert_rgb(
+        over.pixel(toggle.center().x, toggle.y + 2.0),
+        to_rgb(palette.surface_hover),
+        "the toggle must fill with the hover surface under the pointer",
+    );
+    assert_rgb(
+        over.pixel(150.0, 18.0),
+        to_rgb(palette.surface_raised),
+        "the header row outside the toggle must stay untouched",
+    );
+}
+
+#[test]
+fn a_count_badge_paints_a_pill_and_a_zero_count_paints_nothing() {
+    let mut capture = Capture::new();
+    let model_with = |badge: BadgeModel| {
+        let (mut top, bottom) = sample_items();
+        top[1].badge = Some(badge);
+        NavigationRailModel::new(top, bottom, PaneId::Files)
+    };
+    let pill_band = Rectangle::new(
+        Point::new(170.0, middle_row(1).y),
+        Size::new(45.0, ROW_HEIGHT),
+    );
+
+    let counted = capture.frame(RAIL_VIEWPORT, paintable(model_with(BadgeModel::count(3))));
+    let zero = capture.frame(RAIL_VIEWPORT, paintable(model_with(BadgeModel::count(0))));
+
+    assert!(
+        counted.painted_count(
+            pill_band,
+            to_rgb(Palette::dark().surface_raised),
+            SURFACE_TOLERANCE
+        ) >= MIN_CHANGED_PIXELS,
+        "a count badge must paint a pill at the trailing edge of its row"
+    );
+    assert!(
+        zero.differing_pixels(&counted, pill_band) >= MIN_CHANGED_PIXELS,
+        "a zero count is empty and must not paint the pill at all"
+    );
+}
+
+#[test]
+fn compact_mode_paints_a_badge_dot_at_the_corner_of_its_row() {
+    let mut capture = Capture::new();
+    let viewport = Size::new(COMPACT_WIDTH, 400.0);
+    let model_with = |badge: BadgeModel| {
+        let (mut top, bottom) = sample_items();
+        top[1].badge = Some(badge);
+        NavigationRailModel::new(top, bottom, PaneId::Files).with_expanded(false)
+    };
+    let dot = size::INDICATOR_DOT;
+    let dot_rect = Rectangle::new(
+        Point::new(COMPACT_WIDTH - dot - space::XS, middle_row(1).y + space::XS),
+        Size::new(dot, dot),
+    );
+
+    let dotted = capture.frame(viewport, paintable(model_with(BadgeModel::count(3))));
+    let blank = capture.frame(viewport, paintable(model_with(BadgeModel::count(0))));
+    assert!(
+        dotted.differing_pixels(&blank, dot_rect) >= MIN_CHANGED_PIXELS,
+        "the compact badge must paint its dot at the top-right corner of the row"
+    );
+}
+
+#[test]
+fn a_scrolled_row_paints_over_the_header_because_quads_are_not_clipped() {
+    let palette = Palette::dark();
+    let mut capture = Capture::new();
+    let viewport = Size::new(220.0, 200.0);
+    let (top, bottom) = sample_items();
+    let model = NavigationRailModel::new(top, bottom, PaneId::Files);
+    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -36.0 },
+    });
+    let in_list = Point::new(50.0, 100.0);
+
+    let resting = capture.frame(viewport, paintable(model.clone()));
+    assert_rgb(
+        resting.pixel(60.0, 18.0),
+        to_rgb(palette.surface_raised),
+        "the header band beside the toggle is the rail's own surface",
+    );
+
+    let scrolled = capture.frame_after_at(
+        viewport,
+        paintable(model),
+        &[moved(in_list), wheel],
+        mouse::Cursor::Available(in_list),
+    );
+    assert_rgb(
+        scrolled.pixel(60.0, 18.0),
+        to_rgb(palette.surface_active),
+        "DEFECT: a scrolled row paints its fill over the header row — the middle-band \
+         clip rect reaches `fill_text` only, so `fill_quad` bleeds above the band",
+    );
+}

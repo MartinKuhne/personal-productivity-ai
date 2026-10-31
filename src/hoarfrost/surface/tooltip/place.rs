@@ -52,6 +52,8 @@
 //! [`size::CONTROL_LG`]: crate::token::size::CONTROL_LG
 //! [`size::CONTROL_SM`]: crate::token::size::CONTROL_SM
 //! [`space::XS`]: crate::token::space::XS
+//!
+//! Unit tests live in the sibling `place_tests.rs` sidecar.
 
 use crate::geometry::anchor::{self, Anchor, ControlAlignment, Placement};
 use crate::token::space;

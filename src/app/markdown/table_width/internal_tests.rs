@@ -1399,3 +1399,285 @@ fn lagrange_solver_rejects_nan_available() {
 fn hybrid_solver_rejects_infinite_available() {
     solve_hybrid(&[10.0], &[5.0], &[Vec::new()], f32::INFINITY, 10.0, 5.0);
 }
+// -------------------------------------------------------------------
+//  B2 helpers: partial steps and the min-content safety net
+// -------------------------------------------------------------------
+
+/// A deficit smaller than the cheapest step must be cut short: the column
+/// stops *between* breakpoints, the breakpoint is not counted as crossed, and
+/// no follow-up step is queued for it.
+#[test]
+fn b2_stops_mid_step_when_deficit_is_smaller_than_the_step() {
+    let max = [100.0_f32, 80.0];
+    let min = [40.0_f32, 40.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 3,
+        }],
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        }],
+    ];
+
+    // Column 1 is the cheaper shrink (1 line / 40 px vs 3 lines / 60 px), so
+    // it absorbs the whole 10 px deficit and never reaches its breakpoint.
+    let mut widths = [100.0_f32, 80.0];
+    b2_breakpoint_water_fill(&[0, 1], &mut widths, &max, &min, &bps, 10.0);
+
+    assert_eq!(
+        widths,
+        [100.0, 70.0],
+        "a 10 px deficit must stop column 1 mid-step at 70 px"
+    );
+}
+
+/// A deficit larger than one step must cross the breakpoint, bank its extra
+/// lines, queue the next cheaper step for the same column, and then spend
+/// whatever is left on the next column.
+#[test]
+fn b2_crosses_a_breakpoint_and_queues_the_next_step_for_the_same_column() {
+    let max = [100.0_f32, 80.0];
+    let min = [40.0_f32, 40.0];
+    // Breakpoints are stored ascending; B2 consumes them from the highest
+    // width downwards, so column 1 steps 80 -> 60 -> 40.
+    let bps = vec![
+        vec![Breakpoint {
+            width: 50.0,
+            extra_lines: 8,
+        }],
+        vec![
+            Breakpoint {
+                width: 40.0,
+                extra_lines: 3,
+            },
+            Breakpoint {
+                width: 60.0,
+                extra_lines: 1,
+            },
+        ],
+    ];
+
+    // 30 px: 20 px take column 1 across its 60 px breakpoint, the remaining
+    // 10 px continue down the same column's next (still cheaper) step.
+    let mut widths = [100.0_f32, 80.0];
+    b2_breakpoint_water_fill(&[0, 1], &mut widths, &max, &min, &bps, 30.0);
+
+    assert_eq!(
+        widths,
+        [100.0, 50.0],
+        "column 1 must cross 60 px and then absorb the residual down to 50 px"
+    );
+    assert!(
+        widths[1] >= min[1],
+        "column 1 dropped below its min-content: {widths:?}"
+    );
+}
+
+/// The trailing clamp is a safety net: if a column ever ends up below its
+/// min-content (an exhausted heap cannot shrink it back), it is lifted back
+/// to the floor rather than breaking the never-break-token invariant.
+#[test]
+fn b2_lifts_a_column_back_to_min_content_when_the_heap_is_exhausted() {
+    let max = [100.0_f32];
+    let min = [50.0_f32];
+    // No breakpoints at all -> the heap is empty and the loop breaks at once.
+    let bps: Vec<Vec<Breakpoint>> = vec![Vec::new()];
+
+    let mut widths = [20.0_f32];
+    b2_breakpoint_water_fill(&[0], &mut widths, &max, &min, &bps, 10.0);
+
+    assert_eq!(
+        widths,
+        [50.0],
+        "an exhausted heap must not leave the column below min-content"
+    );
+}
+
+// -------------------------------------------------------------------
+//  WaterFillRatio: zero min-content columns
+// -------------------------------------------------------------------
+
+/// An empty cell has a min-content of zero, so the equal-ratio target can
+/// never fall below its floor and it is never clamped out of the active set.
+/// It keeps its share of the surplus and takes the sub-pixel residual.
+#[test]
+fn waterfill_ratio_never_clamps_a_zero_min_content_column() {
+    let max = [100.0_f32, 200.0, 100.0];
+    let min = [60.0_f32, 0.0, 60.0];
+    let bps: Vec<Vec<Breakpoint>> = vec![Vec::new(); 3];
+    let available = 181.0_f32;
+
+    let d = ftwa_ratio(&max, &min, &bps, available);
+
+    assert!(
+        !d.needs_horizontal_scroll,
+        "181 px covers the 120 px of min-content, so no scroll is needed"
+    );
+    assert_eq!(d.widths.len(), 3, "one width per column");
+    for (j, (&w, &m)) in d.widths.iter().zip(min.iter()).enumerate() {
+        assert!(w.is_finite(), "column {j} width {w} is not finite");
+        assert!(
+            w >= m - 1e-3,
+            "column {j} width {w} fell below its min-content {m}: {:?}",
+            d.widths
+        );
+    }
+    assert!(
+        d.widths[1] > 0.0,
+        "the zero-min column is starved even though width is left over: {:?}",
+        d.widths
+    );
+    assert!(
+        d.widths[1] >= d.widths[0],
+        "the unclamped column must end up at least as wide as a clamped one: {:?}",
+        d.widths
+    );
+    assert!(
+        (d.widths.iter().sum::<f32>() - available).abs() < 1e-2,
+        "widths {:?} do not fill {available}: {:?}",
+        d.widths.iter().sum::<f32>(),
+        d.widths
+    );
+}
+
+/// The Lagrangian tie-break prefers the **wider** candidate when two candidates
+/// cost the same. Both sub-branches are defensive: they can only fire when a
+/// candidate width sits outside `[min_j, max_j]`, which the solver contract
+/// rules out. Pinned so a refactor cannot silently invert the rule.
+#[test]
+fn lagrange_optimal_width_tie_breaks_toward_the_wider_candidate() {
+    // At λ = 0 the max candidate costs 0, and the highest breakpoint's wide-side
+    // wrap cost is 0 too — so a breakpoint wider than max_content ties and wins.
+    let max = [100.0_f32];
+    let min = [40.0_f32];
+    let bps = vec![vec![Breakpoint {
+        width: 150.0,
+        extra_lines: 1,
+    }]];
+    assert_eq!(
+        lagrange_optimal_width(0.0, 0, &max, &min, &bps),
+        150.0,
+        "an equal-cost breakpoint wider than max_content must win the tie-break"
+    );
+
+    // With no breakpoints and min_content above max_content (an out-of-contract
+    // input this pure helper does not assert on), the min candidate ties at zero
+    // cost and wins for being the wider of the two.
+    let inverted_max = [100.0_f32];
+    let inverted_min = [200.0_f32];
+    let no_bps: Vec<Vec<Breakpoint>> = vec![Vec::new()];
+    assert_eq!(
+        lagrange_optimal_width(0.0, 0, &inverted_max, &inverted_min, &no_bps),
+        200.0,
+        "an equal-cost min_content candidate must win the tie-break"
+    );
+}
+
+/// `Breakpoint`, `CellTokens` and `ColumnWidths` are cloned into the UI adapter
+/// and diffed against the previous layout, so the derived impls must cover
+/// every field.
+#[test]
+fn breakpoint_cell_tokens_and_column_widths_derived_impls_cover_every_field() {
+    let bp = Breakpoint {
+        width: 80.0,
+        extra_lines: 2,
+    };
+    assert_eq!(bp, bp.clone(), "a cloned breakpoint must compare equal");
+    assert_ne!(
+        bp,
+        Breakpoint {
+            width: 80.0,
+            extra_lines: 3,
+        },
+        "extra_lines is part of a breakpoint's identity"
+    );
+    assert_ne!(
+        bp,
+        Breakpoint {
+            width: 81.0,
+            extra_lines: 2,
+        },
+        "width is part of a breakpoint's identity"
+    );
+    let bp_debug = format!("{bp:?}");
+    assert!(
+        bp_debug.contains("Breakpoint") && bp_debug.contains("80"),
+        "Debug must name the curve step and its width, got: {bp_debug}"
+    );
+
+    let cell = CellTokens {
+        token_widths: vec![30.0, 40.0],
+    };
+    assert_eq!(
+        cell.clone().token_widths,
+        cell.token_widths,
+        "a cloned cell must keep its token widths"
+    );
+
+    let layout = ColumnWidths {
+        widths: vec![10.0, 20.0],
+        needs_horizontal_scroll: true,
+    };
+    assert_eq!(layout, layout.clone(), "a cloned layout must compare equal");
+    assert_ne!(
+        layout,
+        ColumnWidths {
+            widths: vec![10.0, 20.0],
+            needs_horizontal_scroll: false,
+        },
+        "the scroll flag is part of the layout identity"
+    );
+    assert_ne!(
+        layout,
+        ColumnWidths {
+            widths: vec![10.0],
+            needs_horizontal_scroll: true,
+        },
+        "the per-column widths are part of the layout identity"
+    );
+    let layout_debug = format!("{layout:?}");
+    assert!(
+        layout_debug.contains("ColumnWidths") && layout_debug.contains("needs_horizontal_scroll"),
+        "Debug must name the layout and its flag, got: {layout_debug}"
+    );
+}
+
+/// A cell that holds no tokens contributes no curve, so a column of empty cells
+/// has no breakpoints at all — the merge loop must not invent a zero-width step.
+#[test]
+fn compute_column_breakpoints_ignores_cells_without_tokens() {
+    let cells = [
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+    ];
+
+    assert!(
+        compute_column_breakpoints(&cells, 4.0).is_empty(),
+        "empty cells never wrap, so the column has no cost curve"
+    );
+
+    // Mixed with a wrapping cell, only that cell's steps survive.
+    let mixed = [
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+        CellTokens {
+            token_widths: vec![30.0, 30.0],
+        },
+    ];
+    let merged = compute_column_breakpoints(&mixed, 4.0);
+    assert_eq!(
+        merged,
+        vec![Breakpoint {
+            width: 64.0,
+            extra_lines: 1,
+        }],
+        "the empty cell must contribute nothing to the merged curve"
+    );
+}

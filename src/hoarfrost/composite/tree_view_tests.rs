@@ -6,9 +6,11 @@ use crate::composite::tree_view::{
     MAX_TREE_DEPTH, Modifiers, SEARCH_ACTION_SIZE, SEARCH_FOOTER_DIVIDER_WIDTH,
     SEARCH_FOOTER_HEIGHT, SEARCH_FOOTER_PADDING_X, SEARCH_FOOTER_PADDING_Y, SEARCH_INPUT_HEIGHT,
     SEARCH_PLACEHOLDER, SearchFooterConfig, SelectionMode, SyncReport, TreeEvent, TreeKey,
-    TreeStructure, TreeView, VisibleRow, visible_rows,
+    TreeStructure, TreeView, VisibleRow, render_tree_with_footer, visible_rows,
 };
 use crate::focus::{FocusId, FocusState};
+use crate::test_helpers::{Capture, SURFACE_TOLERANCE};
+use iced::{Point, Rectangle, Size};
 use std::collections::BTreeSet;
 
 type Id = &'static str;
@@ -923,4 +925,454 @@ fn test_tree_view_render_pinned_search_footer() {
 
     let rendered = view.render_with_footer(dummy_tree, dummy_search, &palette);
     let _el: iced::Element<'_, ()> = rendered;
+}
+
+#[test]
+fn every_footer_from_impl_seeds_the_default_placeholder_and_an_empty_query() {
+    let bare: SearchFooterConfig = ().into();
+    assert_eq!(bare, SearchFooterConfig::default());
+    assert!(bare.query.is_empty(), "the unit mount means \"no query\"");
+    assert_eq!(bare.placeholder, SEARCH_PLACEHOLDER);
+    assert!(!bare.is_active);
+
+    let borrowed: SearchFooterConfig = "rust".into();
+    let owned: SearchFooterConfig = String::from("rust").into();
+    assert_eq!(borrowed.query, "rust");
+    assert_eq!(
+        owned, borrowed,
+        "a `&str` and a `String` must seed the same configuration"
+    );
+    assert_eq!(borrowed.placeholder, SEARCH_PLACEHOLDER);
+    assert!(!borrowed.is_active);
+    assert_eq!(
+        SearchFooterConfig::new(),
+        SearchFooterConfig::default(),
+        "new() is the default and nothing else"
+    );
+
+    let view = TreeView::<Id>::new(SelectionMode::Single).with_search_footer("needle");
+    assert_eq!(
+        view.search_footer().map(|cfg| cfg.query.as_str()),
+        Some("needle"),
+        "the mount accepts a bare query string through the same `Into`"
+    );
+}
+
+#[test]
+fn the_footer_builders_override_one_field_at_a_time() {
+    let cfg = SearchFooterConfig::new()
+        .with_placeholder("Find a file")
+        .with_active(true);
+    assert_eq!(cfg.placeholder, "Find a file");
+    assert!(cfg.is_active, "the host says the filter is applied");
+    assert!(cfg.query.is_empty(), "neither builder invents a query");
+
+    let cleared = cfg.clone().with_active(false);
+    assert!(!cleared.is_active);
+    assert_eq!(
+        cleared.placeholder, "Find a file",
+        "the other field is untouched"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 13 - degenerate input, the depth bound, and what the band actually paints
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_empty_structure_answers_nothing_about_anything() {
+    let s = TreeStructure::<Id>::default();
+    assert!(s.nodes().is_empty());
+    assert!(s.roots().is_empty());
+    assert!(!s.contains(&"root"), "an empty tree contains nothing");
+    assert_eq!(s.parent_of(&"root"), None);
+    assert!(s.children_of(&"root").is_empty());
+    assert!(!s.is_expandable(&"root"));
+    assert_eq!(s.ancestors(&"root"), Vec::<Id>::new());
+    assert!(
+        !s.is_ancestor_of(&"root", &"root"),
+        "nothing is an ancestor of anything in an empty tree"
+    );
+    assert_eq!(
+        TreeStructure::<Id>::new(),
+        s,
+        "new() and default() are the same empty tree"
+    );
+}
+
+#[test]
+fn a_self_parented_node_walks_the_bound_instead_of_looping_forever() {
+    let s = TreeStructure::from_pairs(&[("loop", Some("loop"))]);
+    let chain = s.ancestors(&"loop");
+    assert_eq!(
+        chain.len(),
+        MAX_TREE_DEPTH,
+        "the walk stops at the bound it advertises rather than spinning"
+    );
+    assert!(
+        chain.iter().all(|id| *id == "loop"),
+        "a self-link reports the cycle it walked, truncated"
+    );
+    assert!(
+        visible_rows(&s, &expanded(&[])).is_empty(),
+        "a node parented to itself is neither a root nor a child of one, so it is not on screen"
+    );
+}
+
+#[test]
+fn the_flatten_stops_at_the_depth_bound_instead_of_growing_forever() {
+    let pairs: Vec<(usize, Option<usize>)> = (0..=MAX_TREE_DEPTH + 1)
+        .map(|depth| (depth, depth.checked_sub(1)))
+        .collect();
+    let chain = TreeStructure::from_pairs(&pairs);
+    let open: BTreeSet<usize> = (0..=MAX_TREE_DEPTH + 1).collect();
+
+    let rows = visible_rows(&chain, &open);
+    assert_eq!(
+        rows.len(),
+        MAX_TREE_DEPTH + 1,
+        "the row at depth {MAX_TREE_DEPTH} is the last one kept; the one below it is dropped"
+    );
+    assert_eq!(rows.first().unwrap().depth, 0);
+    assert_eq!(rows.last().unwrap().depth, MAX_TREE_DEPTH);
+}
+
+#[test]
+fn an_expansion_flag_for_a_hidden_branch_stays_inert() {
+    let s = fixture();
+    // `a` is marked open, but its own parent is folded, so nothing under it
+    // ever reaches the row list.
+    let rows = visible_rows(&s, &expanded(&["a"]));
+    assert_eq!(
+        ids(&rows),
+        vec!["root", "c"],
+        "an expansion flag on a row that is not visible cannot reveal its children"
+    );
+}
+
+#[test]
+fn a_focus_jump_longer_than_the_list_lands_on_the_end_it_was_heading_for() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root", "a", "b"]));
+    let mut view = single_with_focus(&s, "a");
+    assert_eq!(
+        view.move_focus(&rows, 100),
+        Some("c"),
+        "clamped at the last row"
+    );
+    assert_eq!(
+        view.move_focus(&rows, -100),
+        Some("root"),
+        "clamped at the first row, not wrapped to the last"
+    );
+    assert_eq!(
+        view.move_focus(&rows, 0),
+        Some("root"),
+        "a zero delta is a no-op"
+    );
+    assert_eq!(view.focus_slot(), Some(0));
+}
+
+#[test]
+fn entering_focus_on_an_empty_list_is_silent_in_both_directions() {
+    let mut view = TreeView::<Id>::new(SelectionMode::Single);
+    assert_eq!(view.enter_focus(&[], 1), None);
+    assert_eq!(view.enter_focus(&[], -1), None);
+    assert_eq!(view.focus_slot(), None, "a failed entry records no slot");
+}
+
+#[test]
+fn a_view_that_never_selected_anything_has_no_anchor_to_resolve() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root"]));
+    let mut view = TreeView::<Id>::new(SelectionMode::ExtendedMulti);
+    assert_eq!(view.resolve_anchor(&s, &rows), None);
+    view.focus_index(&rows, 2).unwrap();
+    assert_eq!(
+        view.resolve_anchor(&s, &rows),
+        None,
+        "focus is not an anchor; a shift with no prior selection has nothing to extend from"
+    );
+}
+
+#[test]
+fn shift_without_any_anchor_selects_the_focused_row_alone_and_anchors_it() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root", "a"]));
+    let mut view = TreeView::<Id>::new(SelectionMode::ExtendedMulti);
+    let events = view.handle_key(TreeKey::Down, Modifiers::shift(), &s, &rows);
+    assert_eq!(view.focused(), Some(&"root"));
+    assert_eq!(view.selected(), &expanded(&["root"]));
+    assert_eq!(
+        view.anchor(),
+        Some(&"root"),
+        "the fallback row becomes the anchor, so the next shift extends from here"
+    );
+    assert_eq!(
+        events,
+        vec![TreeEvent::SelectionChanged(expanded(&["root"]))]
+    );
+
+    let _ = view.handle_key(TreeKey::Down, Modifiers::shift(), &s, &rows);
+    assert_eq!(view.selected(), &expanded(&["root", "a"]));
+}
+
+#[test]
+fn shift_in_single_mode_still_extends_a_range() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root", "a"]));
+    let mut view = single_with_focus(&s, "root");
+    let _ = view.select_single(&"root");
+    let events = view.handle_key(TreeKey::Down, Modifiers::shift(), &s, &rows);
+    assert_eq!(view.focused(), Some(&"a"));
+    assert_eq!(
+        view.selected(),
+        &expanded(&["root", "a"]),
+        "Shift is an explicit range request and the tree honours it in Single mode too, \
+         even though Space and Ctrl+A refuse there — the inconsistency is recorded, not hidden"
+    );
+    assert_eq!(events.len(), 1);
+}
+
+#[test]
+fn a_focus_that_lost_its_branch_and_its_ancestors_falls_back_to_the_slot() {
+    let mut view = TreeView::<Id>::new(SelectionMode::Single);
+    let stranded = vec![VisibleRow {
+        id: "orphan",
+        depth: 0,
+        expandable: false,
+        expanded: false,
+    }];
+    view.focus_index(&stranded, 0).unwrap();
+
+    let structure = TreeStructure::from_pairs(&[("root", None), ("orphan", Some("ghost"))]);
+    let rows = visible_rows(&structure, &expanded(&[]));
+    assert_eq!(
+        ids(&rows),
+        vec!["root"],
+        "`orphan` is parented to a node that was never declared, so it is not a root"
+    );
+
+    let report = view.sync_to(&structure, &rows);
+    assert_eq!(report.lost_focus, Some("orphan"));
+    assert_eq!(
+        report.landed_focus,
+        Some("root"),
+        "with no visible ancestor to fall back to, the slot rule takes over"
+    );
+    assert_eq!(view.focused(), Some(&"root"));
+    assert_eq!(view.focus_slot(), Some(0));
+}
+
+#[test]
+fn a_slot_past_the_end_of_a_shrunken_list_wraps_instead_of_falling_off() {
+    let s = fixture();
+    let mut view = TreeView::<Id>::new(SelectionMode::Single);
+    for id in ["root", "a", "b"] {
+        view.set_expanded(&id, true);
+    }
+    let full = visible_rows(&s, view.expanded());
+    assert_eq!(full.len(), 7);
+    view.focus_index(&full, full.len() - 1).unwrap();
+    assert_eq!(view.focused(), Some(&"c"));
+    assert_eq!(view.focus_slot(), Some(6));
+
+    let shrunk = TreeStructure::from_pairs(&[("root", None), ("a", Some("root"))]);
+    let rows = visible_rows(&shrunk, view.expanded());
+    assert_eq!(ids(&rows), vec!["root", "a"]);
+
+    let report = view.sync_to(&shrunk, &rows);
+    assert_eq!(report.lost_focus, Some("c"));
+    assert_eq!(
+        report.landed_focus,
+        Some("root"),
+        "slot 6 in a two-row list is slot 0 — the remembered ordinal wraps rather than \
+         falling off the end and leaving the keyboard pointing at nothing"
+    );
+    assert_eq!(view.focused(), Some(&"root"));
+    assert_eq!(view.focus_slot(), Some(0));
+}
+
+#[test]
+fn a_default_report_is_clean_and_one_field_makes_it_dirty() {
+    let mut report = SyncReport::<Id>::default();
+    assert!(report.is_clean(), "{report:?}");
+    assert!(report.dropped_selected.is_empty());
+    assert_eq!(report.dropped_anchor, None);
+
+    report.dropped_selected.push("a");
+    assert!(
+        !report.is_clean(),
+        "a dropped selection is not a clean resync"
+    );
+
+    let anchor_only = SyncReport::<Id> {
+        dropped_anchor: Some("a"),
+        ..Default::default()
+    };
+    assert!(
+        !anchor_only.is_clean(),
+        "a dropped anchor is a change the host must hear about"
+    );
+}
+
+#[test]
+fn the_mode_and_modifier_primitives_agree_with_their_names() {
+    assert_eq!(SelectionMode::default(), SelectionMode::Single);
+    assert!(!SelectionMode::Single.is_multi());
+    assert!(SelectionMode::ExtendedMulti.is_multi());
+    assert_eq!(Modifiers::default(), Modifiers::none());
+    assert!(Modifiers::shift().shift && !Modifiers::shift().ctrl);
+    assert!(Modifiers::ctrl().ctrl && !Modifiers::ctrl().shift);
+    assert!(
+        !Modifiers::none().shift && !Modifiers::none().ctrl,
+        "both modifiers are independent bits, and none() sets neither"
+    );
+    assert_eq!(
+        TreeView::<Id>::default().mode(),
+        SelectionMode::Single,
+        "a default view is a single-selection view"
+    );
+}
+
+#[test]
+fn left_on_a_leaf_marked_open_still_hops_to_its_parent() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root"]));
+    let mut view = single_with_focus(&s, "a1");
+    view.set_expanded(&"a1", true);
+    let events = view.handle_key(TreeKey::Left, Modifiers::none(), &s, &rows);
+    assert!(
+        events.is_empty(),
+        "a leaf has nothing to collapse, so no toggle is reported"
+    );
+    assert_eq!(view.focused(), Some(&"a"), "the parent hop is the fallback");
+}
+
+#[test]
+fn ctrl_home_and_end_move_focus_without_editing_the_selection() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root", "a", "b"]));
+    let mut view = single_with_focus(&s, "a1");
+    let _ = view.select_single(&"a1");
+
+    let events = view.handle_key(TreeKey::End, Modifiers::ctrl(), &s, &rows);
+    assert!(
+        events.is_empty(),
+        "Ctrl means focus-only, so a single-selection tree must not be edited"
+    );
+    assert_eq!(view.focused(), Some(&"c"));
+    assert_eq!(view.selected(), &expanded(&["a1"]));
+
+    let events = view.handle_key(TreeKey::Home, Modifiers::ctrl(), &s, &rows);
+    assert!(events.is_empty());
+    assert_eq!(view.focused(), Some(&"root"));
+    assert_eq!(view.selected(), &expanded(&["a1"]));
+}
+
+#[test]
+fn space_in_single_mode_selects_the_focused_row_rather_than_toggling_it_off() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root"]));
+    let mut view = single_with_focus(&s, "a");
+    let events = view.handle_key(TreeKey::ToggleSelect, Modifiers::none(), &s, &rows);
+    assert_eq!(events, vec![TreeEvent::SelectionChanged(expanded(&["a"]))]);
+    assert!(view.is_selected(&"a"));
+
+    let events = view.handle_key(TreeKey::ToggleSelect, Modifiers::none(), &s, &rows);
+    assert_eq!(
+        events,
+        Vec::<TreeEvent<Id>>::new(),
+        "a second Space cannot empty a single-selection tree"
+    );
+    assert!(view.is_selected(&"a"));
+    assert_eq!(view.anchor(), Some(&"a"));
+}
+
+#[test]
+fn select_all_in_single_mode_reports_nothing() {
+    let s = fixture();
+    let rows = visible_rows(&s, &expanded(&["root"]));
+    let mut view = TreeView::<Id>::new(SelectionMode::Single);
+    let events = view.handle_key(TreeKey::SelectAll, Modifiers::ctrl(), &s, &rows);
+    assert!(
+        events.is_empty(),
+        "single mode cannot hold a set, so there is nothing to report"
+    );
+    assert!(view.selected().is_empty());
+}
+
+#[test]
+fn a_preserving_menu_leaves_an_unselected_row_outside_the_group() {
+    let mut view = TreeView::<Id>::new(SelectionMode::ExtendedMulti);
+    let _ = view.toggle_selected(&"a");
+    let events = view.context_menu(&"c", Point::new(3.0, 4.0), true);
+    assert_eq!(
+        events.len(),
+        1,
+        "preserve means the selection is not touched"
+    );
+    assert_eq!(
+        view.selected(),
+        &expanded(&["a"]),
+        "the menu acts on the group the user already had, not on the row under the pointer"
+    );
+    match &events[0] {
+        TreeEvent::ContextMenu(set, at) => {
+            assert_eq!(set, &expanded(&["a"]));
+            assert_eq!(*at, Point::new(3.0, 4.0));
+        }
+        other => panic!("expected a context menu, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_pinned_footer_band_paints_its_own_surface_at_the_foot_of_the_frame() {
+    use crate::token::color::Palette;
+
+    let viewport = Size::new(160.0, 100.0);
+    let body: iced::Element<'_, ()> = iced::widget::Space::new().width(0.0).height(0.0).into();
+    let input: iced::Element<'_, ()> = iced::widget::Space::new().width(0.0).height(0.0).into();
+    let rendered = render_tree_with_footer(body, input, &Palette::dark());
+
+    let mut capture = Capture::new();
+    let frame = capture.frame(viewport, rendered);
+
+    let above = frame.painted_count(
+        Rectangle::new(Point::new(0.0, 0.0), Size::new(viewport.width, 50.0)),
+        [0, 0, 0],
+        SURFACE_TOLERANCE,
+    );
+    assert_eq!(
+        above, 0,
+        "the wrapper must not paint over the tree body it pins the band under"
+    );
+
+    let first_painted = (0..viewport.height as u32)
+        .find(|&row| {
+            frame.painted_count(
+                Rectangle::new(Point::new(0.0, row as f32), Size::new(viewport.width, 1.0)),
+                [0, 0, 0],
+                SURFACE_TOLERANCE,
+            ) > 0
+        })
+        .expect("the footer band must paint something");
+    let band_height = viewport.height - first_painted as f32;
+    assert!(
+        (band_height - SEARCH_FOOTER_HEIGHT).abs() <= 2.0,
+        "the band is pinned at the foot of the frame and {band_height}px tall, expected \
+         {SEARCH_FOOTER_HEIGHT}"
+    );
+
+    let inside = frame.pixel(
+        viewport.width / 2.0,
+        viewport.height - SEARCH_FOOTER_HEIGHT / 2.0,
+    );
+    assert!(
+        inside
+            .iter()
+            .any(|&channel| i32::from(channel) > i32::from(SURFACE_TOLERANCE)),
+        "the band carries its own raised-surface fill rather than the page behind it, \
+         sampled {inside:?}"
+    );
 }
