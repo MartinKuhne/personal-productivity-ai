@@ -75,9 +75,11 @@ pub struct LlmConfig {
     pub api_key: String,
     /// Declared price for auto-model selection (lower = preferred).
     ///
-    /// An absent price means *unknown*, never free — see [`LlmConfig::cost_rank`].
-    /// [`LlmConfig::get_cost`] still reports `0` for an absent price, but only
-    /// as a display convenience.
+    /// An absent price means **free**: `cost` is an optional integer whose
+    /// documented default is `0` ([AGENT-005], [CONFIG-006], [CONFIG-008]), so
+    /// a model nobody priced ties with a declared `cost: 0` and wins
+    /// cheapest-first selection ([AGENT-030], [AGENT-019]).
+    /// [`LlmConfig::get_cost`] reports that default.
     #[serde(default)]
     pub cost: Option<i32>,
     /// Use cases for this model (e.g. "chat", "vision", "embeddings").
@@ -124,36 +126,15 @@ pub fn default_use_case() -> Vec<String> {
 }
 
 impl LlmConfig {
-    /// Declared price for auto-model selection, or `0` when no price was set.
+    /// Price used for auto-model selection: the declared `cost`, or `0` when
+    /// no price was set.
     ///
-    /// The `0` fallback is a display/compare convenience only: it makes an
-    /// unpriced model look free. Use [`LlmConfig::cost_rank`] when a model has
-    /// to be *selected* by price.
+    /// The `0` is the documented default for an absent `cost` ([AGENT-005],
+    /// [CONFIG-006], [CONFIG-008]) and is the value selection actually ranks
+    /// on: an unpriced model is treated as free, so it ties with a declared
+    /// `cost: 0` and beats every priced model ([AGENT-030], [AGENT-019]).
     pub fn get_cost(&self) -> i32 {
         self.cost.unwrap_or(0)
-    }
-
-    /// Ranking key that treats a missing price as **unknown**, never as free.
-    ///
-    /// `cost: None` means the user never declared a price, so the model must
-    /// not win a cheapest-first selection against a model with an explicit
-    /// price — `get_cost` would coerce the missing price to `0` and rank it
-    /// as the cheapest model in the set. The tuple puts every priced model at
-    /// `(0, cost)` and every unpriced one at `(1, 0)`, so all priced models
-    /// sort before all unpriced ones while priced models keep exactly the
-    /// relative order `get_cost()` gives them.
-    ///
-    /// Spec drift (RUST-041): `AGENT-005` words this field as "optional
-    /// integer, default 0", which would make an absent price free and let it
-    /// tie with a declared `cost: 0`. Selection deliberately treats it as
-    /// unknown instead; the spec has not been amended (RUST-043), so the
-    /// divergence stands until a product decision resolves it.
-    #[must_use]
-    pub fn cost_rank(&self) -> (u8, i32) {
-        match self.cost {
-            Some(cost) => (0, cost),
-            None => (1, 0),
-        }
     }
 
     pub fn has_use_case(&self, use_case: impl AsRef<str>) -> bool {
@@ -589,16 +570,17 @@ impl AgentConfig {
 
     /// Cheapest configured model that declares `use_case`, if any.
     ///
-    /// Ranking uses [`LlmConfig::cost_rank`], so a model with no declared
-    /// price never beats an explicitly priced one. Among candidates that rank
-    /// equally, `HashMap` iteration order decides — the map has no defined
-    /// order, so callers must not depend on which tied model is returned.
+    /// Ranking uses [`LlmConfig::get_cost`], so a model with no declared price
+    /// counts as free ([AGENT-005]) and wins against a priced one. Among
+    /// candidates that rank equally, `HashMap` iteration order decides — the
+    /// map has no defined order, so callers must not depend on which tied
+    /// model is returned.
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
-            .min_by_key(|(_, cfg)| cfg.cost_rank())
+            .min_by_key(|(_, cfg)| cfg.get_cost())
     }
 
     pub fn select_chat_model(&self) -> Result<&LlmConfig, String> {

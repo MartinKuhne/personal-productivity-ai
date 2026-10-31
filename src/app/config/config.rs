@@ -618,19 +618,22 @@ impl AppConfig {
 
     /// Find the best model for a given use_case (lowest cost among matches).
     ///
-    /// A model with no configured price ranks *after* every priced model: an
-    /// unknown price is not a free price (see [`LlmConfig::cost_rank`]).
+    /// A model with no configured price counts as free: `cost` defaults to `0`
+    /// ([CONFIG-006], [CONFIG-008]), so an unpriced model ranks ahead of every
+    /// priced one and ties with a declared `cost: 0`.
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
-            .min_by_key(|(_, cfg)| cfg.cost_rank())
+            .min_by_key(|(_, cfg)| cfg.get_cost())
     }
 
     /// Find all models tied for the minimum cost for a given use_case.
     ///
-    /// Unpriced models only win when *no* priced model matches the use case.
+    /// An unpriced model defaults to a cost of `0` ([CONFIG-006]), so it is
+    /// returned alongside any explicitly free model whenever either is the
+    /// cheapest match.
     pub fn models_for_use_case_min_cost(
         &self,
         use_case: impl AsRef<str>,
@@ -646,12 +649,12 @@ impl AppConfig {
         }
         let min_cost = candidates
             .iter()
-            .map(|(_, cfg)| cfg.cost_rank())
+            .map(|(_, cfg)| cfg.get_cost())
             .min()
             .unwrap();
         candidates
             .into_iter()
-            .filter(|(_, cfg)| cfg.cost_rank() == min_cost)
+            .filter(|(_, cfg)| cfg.get_cost() == min_cost)
             .collect()
     }
 

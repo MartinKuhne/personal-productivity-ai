@@ -1497,13 +1497,12 @@ fn test_models_for_use_case_min_cost_returns_every_tied_model() {
     );
 }
 
-/// **Defect 02, fixed.** An unpriced model (`cost: None`) means "price unknown",
-/// not "free". [`LlmConfig::get_cost`] still reports `0` for display, but
-/// `model_for_use_case` and `models_for_use_case_min_cost` rank on
-/// [`LlmConfig::cost_rank`], so an unpriced model comes *after* every priced
-/// model and no longer ties with a genuinely free (`Some(0)`) one.
+/// `cost` is documented to default to `0` ([CONFIG-006], [CONFIG-008]), so an
+/// unpriced model is free: it ranks ahead of every priced model and ties with a
+/// declared `cost: 0`, and `models_for_use_case_min_cost` returns it together
+/// with any explicitly free model.
 #[test]
-fn app_config_ranks_an_unpriced_model_after_every_priced_one() {
+fn app_config_ranks_an_unpriced_model_as_free() {
     let mut config = AppConfig::default();
     config
         .models
@@ -1524,11 +1523,11 @@ fn app_config_ranks_an_unpriced_model_after_every_priced_one() {
 
     assert_eq!(
         keys,
-        vec!["cheap"],
-        "an unknown price must not beat a configured one"
+        vec!["unpriced"],
+        "an absent price defaults to 0, so it is the minimum-cost match"
     );
 
-    // An explicitly free model wins outright; the unpriced one no longer ties.
+    // A declared 0 and an absent price are the same price, so both are returned.
     config
         .models
         .insert("free".to_string(), chat_model("d", Some(0)));
@@ -1540,12 +1539,11 @@ fn app_config_ranks_an_unpriced_model_after_every_priced_one() {
     tied.sort_unstable();
     assert_eq!(
         tied,
-        vec!["free"],
-        "only a genuinely free model is the minimum-cost match"
+        vec!["free", "unpriced"],
+        "a declared 0 and an absent price must tie at the minimum"
     );
 
-    // With no priced model at all the unpriced ones still win, so a config
-    // without any `cost:` entries keeps selecting a model.
+    // A config without any `cost:` entries keeps selecting every model.
     let mut unpriced_only = AppConfig::default();
     unpriced_only
         .models
@@ -1562,7 +1560,7 @@ fn app_config_ranks_an_unpriced_model_after_every_priced_one() {
     assert_eq!(
         all_unknown,
         vec!["one", "two"],
-        "when nothing is priced, everything is tied and still selectable"
+        "when nothing is priced, everything is tied at 0 and still selectable"
     );
 }
 
