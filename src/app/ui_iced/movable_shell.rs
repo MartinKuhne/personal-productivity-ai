@@ -32,6 +32,26 @@
 //! fields inside a band keep working while the card still absorbs whatever
 //! they leave behind.
 //!
+//! # Why every lane translates its point into root space
+//!
+//! `mouse_area::on_press` carries no point in iced 0.14, so a press has to be
+//! positioned from the last move the same band reported — and `on_move` hands
+//! the point back **relative to the band's own bounds**
+//! (`mouse_area.rs:358`, `cursor.position_in(layout.bounds())`). Each lane
+//! therefore adds its band's root-space origin, taken from the host's own
+//! rectangle, before publishing: [`MovableMessage::Moved`] always means
+//! *root space*.
+//!
+//! That translation is not cosmetic. The app's one root-space cursor comes
+//! from the base-layer lane in [`view`](crate::ui_iced::view::view), and
+//! iced's `Stack` **levitates** the cursor past every layer below one that
+//! claims a mouse interaction
+//! (`iced_widget-0.14.2/src/stack.rs:266-273`) — which is exactly what the
+//! title bar's `Grab` and the grip's diagonal-resize cursor do. While the
+//! pointer is on either of them the base layer reports nothing at all, so a
+//! press positioned from it would be positioned from wherever the pointer
+//! last was *outside the card*, or from nothing.
+//!
 //! Unit tests live in the sibling `movable_shell_tests.rs` sidecar.
 
 #[cfg(test)]
@@ -48,8 +68,8 @@ use hoarfrost::surface::movable::{
 };
 use hoarfrost::widget::button::ButtonVariant;
 use hoarfrost::widget::button_widget::Button;
-use iced::widget::{Column, Row, container, mouse_area, space, text};
-use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
+use iced::widget::{Column, Row, container, mouse_area, space, stack, text};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Rectangle, Size};
 
 /// Id string of the log card's content viewport.
 const LOGS_VIEWPORT_ID: &str = "movable.logs.viewport";
@@ -73,8 +93,12 @@ const VIEWPORT_PADDING: f32 = 4.0;
 /// Gap between the title grip glyph and the title text.
 const TITLE_GRIP_GAP: f32 = 6.0;
 
-/// Focus id for the Dock button in the title bar.
-const DOCK_BUTTON_FOCUS_ID: &str = "movable.title_bar.dock";
+/// Horizontal padding of the status footer's leading content (§4.7.1 footer
+/// padding `[0, 12]`).
+///
+/// The **left** inset only. The right inset is [`RESIZE_HANDLE_SIZE`], because
+/// that is where the grip's hit box begins.
+const FOOTER_PADDING_HORIZONTAL: f32 = 12.0;
 
 /// Focus id for the Close button in the title bar.
 ///
@@ -141,7 +165,7 @@ pub fn movable_shell<'a>(
                     ..Default::default()
                 }),
         ))
-        .push(footer(card, status, palette));
+        .push(footer(host, card, status, palette));
 
     // The card-wide absorber. A press anywhere on the card that no inner
     // control claimed stops here instead of falling through to Band 0 —
@@ -171,9 +195,16 @@ pub fn movable_shell<'a>(
         .into()
 }
 
-/// The §4.7.1 title bar — `[⣿] Title ……… [Dock] [Close ×]`,
+/// The §4.7.1 title bar — `[⣿] Title ……… [Close ×]`,
 /// [`TITLE_BAR_HEIGHT`] tall and draggable everywhere except the trailing
 /// action cluster (`UIF-MOV-001`).
+///
+/// The framework still models a `[Dock]` control in that cluster
+/// (`SurfaceTarget::Dock`, `CardControl::Dock`, and the two-square
+/// [`trailing_actions`](MovableHost::trailing_actions) exclusion zone), but
+/// the app **deliberately does not surface it**: no dock behaviour exists, so
+/// the button would be — and was — inert. The framework keeps the target for
+/// its own §4.7.1 model, gallery and tests.
 fn title_bar(host: &MovableHost, card: MovableCard, palette: Palette) -> Element<'static, Message> {
     let title = text(host.title().to_owned())
         .size(crate::ui_iced::logs::ROW_TEXT_SIZE)
@@ -184,31 +215,27 @@ fn title_bar(host: &MovableHost, card: MovableCard, palette: Palette) -> Element
         .push(space::Space::new().width(Length::Fixed(TITLE_GRIP_GAP)))
         .push(title)
         .push(space::Space::new().width(Length::Fill))
-        .push(dock_action(card))
         .push(close_action(card))
         .align_y(Alignment::Center)
         .height(Length::Fixed(TITLE_BAR_HEIGHT))
         .padding(Padding::from([0.0, TITLE_BAR_PADDING_HORIZONTAL]));
 
-    // The drag lane. `on_move` is the only lane iced 0.14 gives a
-    // coordinate on, and the reducer pairs the press with the last position
-    // it reported — see `MovableMessage` for why.
+    // The drag lane. `on_press` carries no point in iced 0.14, so the reducer
+    // pairs a press with the last position this lane reported — and `on_move`
+    // reports it **relative to the bar's own bounds**, so the host's own
+    // title-bar origin is added back to keep the message root-space (see the
+    // module header for why the base-layer cursor cannot stand in for it).
+    let origin = host.title_bar().position();
     mouse_area(bar)
-        .on_move(move |at: Point| Message::Movable(MovableMessage::Moved { card, at }))
+        .on_move(move |at: Point| {
+            Message::Movable(MovableMessage::Moved {
+                card,
+                at: to_root(origin, at),
+            })
+        })
         .on_press(Message::Movable(MovableMessage::TitlePressed { card }))
         .interaction(iced::mouse::Interaction::Grab)
         .into()
-}
-
-/// The title bar's `Dock` trailing action (`UIF-MOV-001`).
-fn dock_action(card: MovableCard) -> Button<'static, Message> {
-    Button::new(
-        ButtonVariant::Ghost,
-        text(strings::MOVABLE_DOCK_BUTTON).size(crate::ui_iced::logs::ROW_TEXT_SIZE),
-        Message::Movable(MovableMessage::DockRequested { card }),
-        DOCK_BUTTON_FOCUS_ID,
-    )
-    .palette(Palette::pro())
 }
 
 /// The title bar's `Close ×` trailing action (`UIF-MOV-001`).
@@ -252,33 +279,47 @@ fn filter_bar<'a>(controls: Row<'a, Message>, palette: Palette) -> Element<'a, M
 
 /// The §4.7.1 status footer, [`FOOTER_HEIGHT`] tall, with the ◢ grip in the
 /// bottom-right corner (`UIF-MOV-002`).
+///
+/// The grip rides in its own layer, anchored to the band's bottom-right
+/// corner, rather than as the last cell of the padded status row: the host
+/// hit-tests the **card's** corner
+/// ([`resize_grip`](MovableHost::resize_grip)`(BottomRight)`), so a grip
+/// padded 12 px in from that corner is painted somewhere the user cannot
+/// resize from at all. Anchoring it to the corner makes the affordance and
+/// the hit box the same rectangle; the status line's right inset is the grip
+/// width so no status control hides underneath it.
 fn footer<'a>(
+    host: &MovableHost,
     card: MovableCard,
     status: Element<'a, Message>,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let grip = mouse_area(
-        container(text(strings::ICON_RESIZE_GRIP).color(palette.text_muted))
-            .width(Length::Fixed(RESIZE_HANDLE_SIZE))
-            .height(Length::Fixed(RESIZE_HANDLE_SIZE))
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
-    )
-    .on_press(Message::Movable(MovableMessage::GripPressed {
-        card,
-        handle: ResizeHandle::BottomRight,
-    }))
-    .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
-
     let bar = Row::new()
         .push(status)
         .push(space::Space::new().width(Length::Fill))
-        .push(grip)
         .align_y(Alignment::Center)
         .height(Length::Fixed(FOOTER_HEIGHT))
-        .padding(Padding::from([0.0, 12.0]));
+        .padding(Padding {
+            top: 0.0,
+            right: RESIZE_HANDLE_SIZE,
+            bottom: 0.0,
+            left: FOOTER_PADDING_HORIZONTAL,
+        });
 
-    container(bar)
+    let band = stack(vec![
+        container(bar)
+            .width(Length::Fill)
+            .height(Length::Fixed(FOOTER_HEIGHT))
+            .into(),
+        container(resize_grip(host, card, palette))
+            .width(Length::Fill)
+            .height(Length::Fixed(FOOTER_HEIGHT))
+            .align_x(Alignment::End)
+            .align_y(iced::alignment::Vertical::Bottom)
+            .into(),
+    ]);
+
+    container(band)
         .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(Background::Color(palette.surface_variant)),
@@ -293,6 +334,64 @@ fn footer<'a>(
         .into()
 }
 
+/// The footer's ◢ grab handle: a [`RESIZE_HANDLE_SIZE`] square sitting exactly
+/// on the host's `BottomRight` grip rectangle (`UIF-MOV-002`).
+///
+/// Like the title bar's lane it reports moves, translated into root space by
+/// that rectangle's own origin, so the press it precedes can be positioned
+/// without the base-layer cursor — which goes silent the moment the pointer
+/// reaches the grip (see the module header).
+fn resize_grip(
+    host: &MovableHost,
+    card: MovableCard,
+    palette: Palette,
+) -> Element<'static, Message> {
+    let band = host
+        .resize_grip(ResizeHandle::BottomRight)
+        .unwrap_or_else(|| corner_of(host.card(), RESIZE_HANDLE_SIZE));
+    let origin = band.position();
+
+    mouse_area(
+        container(text(strings::ICON_RESIZE_GRIP).color(palette.text_muted))
+            .width(Length::Fixed(RESIZE_HANDLE_SIZE))
+            .height(Length::Fixed(RESIZE_HANDLE_SIZE))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+    )
+    .on_move(move |at: Point| {
+        Message::Movable(MovableMessage::Moved {
+            card,
+            at: to_root(origin, at),
+        })
+    })
+    .on_press(Message::Movable(MovableMessage::GripPressed {
+        card,
+        handle: ResizeHandle::BottomRight,
+    }))
+    .interaction(iced::mouse::Interaction::ResizingDiagonallyDown)
+    .into()
+}
+
+/// Lifts a band-relative point into root space by that band's origin.
+///
+/// The single place the shell performs the translation, so no lane can forget
+/// it and publish a point the host would classify against the wrong pixel
+/// ([RUST-023]).
+fn to_root(origin: Point, at: Point) -> Point {
+    Point::new(origin.x + at.x, origin.y + at.y)
+}
+
+/// The `side × side` square tucked into `rect`'s bottom-right corner.
+///
+/// Only used as the fallback when the host reports no rectangle for a handle
+/// it always has one for, so a frame never has to unwrap.
+fn corner_of(rect: Rectangle, side: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(rect.x + rect.width - side, rect.y + rect.height - side),
+        Size::new(side, side),
+    )
+}
+
 /// The full-screen capture lane a card mounts **while it holds a drag or a
 /// resize** (`UIF-MOV-001`, `UIF-MOV-002`).
 ///
@@ -303,6 +402,10 @@ fn footer<'a>(
 /// every layer for the duration of the gesture keeps `Moved` arriving, and
 /// the release lands here too rather than being lost on whatever the card
 /// just uncovered.
+///
+/// This lane needs no `to_root` translation: it spans the whole viewport
+/// from its origin, so its band-relative point already *is* the root-space
+/// one.
 ///
 /// This is the one place a full-area blocker is legitimate: it exists only
 /// while the user is holding the card, and the whole point of holding it is

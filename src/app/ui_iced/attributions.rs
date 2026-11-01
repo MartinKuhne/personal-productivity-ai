@@ -1,56 +1,52 @@
-//! Third-party attributions window — the credits list behind the About
-//! dialog's attributions section.
+//! Third-party attributions — the credits list the About card renders inline.
 //!
-//! A **pure view over a plain snapshot**: [`attributions_view`] renders an
-//! [`AttributionsViewModel`] into an [`iced::Element`] of [`Message`] and
-//! performs no I/O. The catalog itself is **reused unchanged** —
+//! A **pure view over a plain snapshot**: [`attribution_table`] renders the
+//! catalog into an [`iced::Element`] of [`Message`] and performs no I/O. The
+//! catalog itself is **reused unchanged** —
 //! `crate::ui::attributions::DIRECT_DEPENDENCIES`, the curated
-//! `&'static [Attribution]` constant in `src/app/ui/attributions.rs` (57
+//! `&'static [Attribution]` constant in `src/app/ui/attributions.rs` (61
 //! direct third-party crates across all four workspace members,
 //! alphabetically sorted, no duplicates). There is no generated
 //! `cargo-about` file and no runtime shell-out anywhere; the data is
 //! compiled in.
 //!
-//! # The framework owns the box, the app owns the rows
+//! # Who owns which line
 //!
-//! As of integration increment INT-5a this window takes its geometry from
-//! [`hoarfrost::surface::modal`] rather than from constants of its own:
+//! The list is a **region of the About card**, so most of what a reader would
+//! call "this window's design" belongs to another module:
 //!
 //! | Concern | Owner |
 //! |---|---|
-//! | Card width (640px) and height (480px), gutter clamp | [`ModalSizing::attributions`] via [`attributions_card_size`] |
-//! | Card surface, border, radius, content padding | [`hoarfrost::surface::modal::ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
+//! | Rows, columns, header captions, link cells | this module ([`attribution_table`], `header_cell`, [`repository_cell`]) |
+//! | The scroll area and its stable id | [`credits_list`] / [`ATTRIBUTIONS_LIST_ID`] here |
+//! | How tall that scroll area is | [`crate::ui_iced::about::credits_list_height`] — the bands above and below it are About's furniture, so the arithmetic lives there |
+//! | The card that hosts the list: surface, border, radius, padding, size | [`crate::ui_iced::about`] through [`crate::ui_iced::overlay::modal_card`] |
 //! | Section divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
-//! | Title / cell type sizes, cell padding | `hoarfrost::token::{typography, space, shape}` |
+//! | Cell type sizes and padding | `hoarfrost::token::{typography, space, shape}` |
 //! | Link colour, underline, hit height | `hoarfrost::widget::hyperlink` resolver (`UIF-ATOM-001d`) |
-//! | Which window is open, what dismisses it | `AboutWindowState` + `OverlayState::close_topmost` |
+//! | Which window is open, what dismisses it | `AboutWindowState` + `OverlayState::close_topmost`, both about the **About** card only |
 //!
-//! The list is no longer a hand-picked `340px` cap. The card is a fixed
-//! 480px box and the scrollable takes `Length::Fill`, so the credits
-//! region is *whatever the card has left* after the title, summary,
-//! dividers and footer — and it stays 480px total whether the catalog has
-//! two rows or two thousand.
+//! The list is not given a hand-picked height either. It is **solved** from
+//! the About card's own height, so the card stays the size the viewport says
+//! and the credits region is *whatever the card has left* after the identity
+//! header, the build-metadata row, the licence region and the footer — and it
+//! is the same card height whether the catalog has two rows or two thousand.
 //!
-//! [`hoarfrost::surface::modal::ModalHost`] is deliberately **not**
-//! used, for the same reason [`crate::ui_iced::about`] does not take it:
-//! the app already owns `SURFACE_ID_ATTRIBUTIONS` in
-//! `crate::ui_iced::app::OverlayState::sync_surfaces` and owns
-//! dismissal in `crate::ui_iced::app::OverlayState::close_topmost`.
-//! Consequently
-//! `UIF-MOD-001` (focus trap), `UIF-MOD-002` (dirty/busy guard) and
-//! `UIF-MOD-003` (error banner) are **not** wired here — see that
-//! module's "What that choice does NOT buy" section for the full
-//! accounting. What *is* wired is the card-boundary absorption
-//! ([`AboutMessage::Absorbed`]) that keeps a press on the card's
-//! padding or a dead row from reaching the scrim.
+//! Because there is no separate window any more, there is no surface id for
+//! it in `crate::ui_iced::app::OverlayState::sync_surfaces` and no entry in
+//! `crate::ui_iced::app::OverlayState::close_topmost`: `Esc` over the credits
+//! list closes the About card, which is what the list is inside. The
+//! card-boundary absorption ([`AboutMessage::Absorbed`]) that keeps a press
+//! on the card's padding or a dead row from reaching the scrim is therefore
+//! About's, not this module's.
 //!
 //! # What the catalog actually carries
 //!
 //! `Attribution { name, authors, github_url }` — that is the whole row.
-//! The catalog has **no per-crate license or version field**, so this
-//! window shows Crate / Authors / Repository and no license column.
+//! The catalog has **no per-crate license or version field**, so the list
+//! shows Crate / Authors / Repository and no license column.
 //! The only license text in the app is FastMD's own MIT license, shown in
-//! the About card ([`crate::ui_iced::about`]). Adding real per-crate
+//! the About card above this list ([`crate::ui_iced::about`]). Adding real per-crate
 //! license data means a new compile-time pipeline (e.g. a `cargo-about`
 //! generated file) — a data-source decision, not something this view
 //! invents.
@@ -65,20 +61,22 @@
 //! header names actually line up.
 //!
 //! ```text
-//! ┌─ Attributions card · 640×480 · surface.overlay · radius 6 ───┐
-//! │ Third-Party Attributions                                     │
-//! │ 57 direct third-party dependencies                           │
-//! │ ──────────────────────────────────────────────────────────── │
-//! │ Crate   │ Authors             │ Repository                   │
-//! │ ────────┼─────────────────────┼──────────────────────────────│
-//! │ anyhow  │ David Tolnay        │ github.com/dtolnay/anyhow    │
-//! │         │                     │  ↑ accent_text, underlined,   │
-//! │         │                     │    24px hit target            │
-//! │         …  Length::Fill — scrolls  …                          │
-//! │ ──────────────────────────────────────────────────────────── │
-//! │                                          [ Close ]           │
-//! └──────────────────────────────────────────────────────────────┘
+//! │ Third-Party Attributions                                    │
+//! │ 61 direct third-party dependencies                          │
+//! │ ─────────────────────────────────────────────────────────── │
+//! │ Crate   │ Authors             │ Repository                  │
+//! │ ────────┼─────────────────────┼─────────────────────────────│
+//! │ anyhow  │ David Tolnay        │ github.com/dtolnay/anyhow   │
+//! │         │                     │  ↑ accent_text, underlined,  │
+//! │         │                     │    24px hit target           │
+//! │         …  the solved height — scrolls …                    │
 //! ```
+//!
+//! The count line, the two rules around the list and everything above and
+//! below them are the **About card's** — see
+//! [`crate::ui_iced::about::about_card`] for the whole card and
+//! [`crate::ui_iced::about::credits_list_height`] for how the list's height
+//! is arrived at.
 //!
 //! The repository cell is a hyperlink. iced has no `hyperlink_to` and
 //! `hoarfrost` ships the hyperlink as a **resolver, not a rendered
@@ -90,152 +88,32 @@
 //! deferred intent [`AboutMessage::RepositoryOpened`] and the reducer
 //! opens the URL.
 //!
-//! The empty catalog renders the same widget tree with an empty table and
-//! an empty-state summary line, so the shape never changes (AGENTS §6).
+//! The empty catalog renders the same widget tree with an empty table, and
+//! [`AttributionsViewModel::summary`] swaps the count line for the empty-state
+//! text, so the shape never changes (AGENTS §6).
 //!
 //! Unit tests live in the sibling `attributions_tests.rs` sidecar.
 
-use iced::widget::{
-    Column, Row, Space, container, mouse_area, rich_text, scrollable, table, text, text::Span,
-};
-use iced::{Alignment, Element, Length, Padding, Point, Rectangle, Size};
+use iced::widget::{container, mouse_area, rich_text, scrollable, table, text, text::Span};
+use iced::{Alignment, Element, Length, Padding};
 
 use hoarfrost::state::{BaseState, VisualState};
-use hoarfrost::surface::modal::{
-    ATTRIBUTIONS_LIST_MAX_HEIGHT, ModalSizing, SubRegionBands, subregion_height,
-};
-use hoarfrost::token::{shape, size, space, typography};
+use hoarfrost::token::{shape, space, typography};
 use hoarfrost::widget::hyperlink;
 
 use crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES};
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::about::{close_button, modal_frame};
+use crate::ui_iced::about::modal_frame;
 use crate::ui_iced::message::{AboutMessage, Message};
-use crate::ui_iced::overlay::{modal_card, modal_divider};
 
 #[cfg(test)]
 #[path = "attributions_tests.rs"]
 mod tests;
 
-/// §4.6.2 — the Attributions card's sizing policy: 640×480 fixed.
-pub const ATTRIBUTIONS_SIZING: ModalSizing = ModalSizing::attributions();
-
-/// The Attributions card's **outer** size for a viewport (§4.6.2).
-///
-/// 640×480, each axis clamped to the viewport minus
-/// [`VIEWPORT_GUTTER`](hoarfrost::surface::modal::VIEWPORT_GUTTER). The
-/// content extent is passed as zero because this policy is *fixed* on
-/// both axes — the card is 480px tall whether the catalog holds two
-/// rows or two thousand, and the list scrolls inside it.
-#[must_use]
-pub fn attributions_card_size(viewport: Size) -> Size {
-    ATTRIBUTIONS_SIZING
-        .solve(Rectangle::new(Point::ORIGIN, viewport), Size::ZERO)
-        .size()
-}
-
-/// Stable id of the Attributions card box itself, so a layout test can
-/// address the rendered card rather than only its contents (AGENTS §5).
-pub const ATTRIBUTIONS_CARD_ID: &str = "attributions_card_frame";
-
 /// Stable id for the credits scroll area, so the reducer can address it
 /// and the scroll position survives a tree rebuild (AGENTS §5).
 pub const ATTRIBUTIONS_LIST_ID: &str = "attributions_list_scroll";
-
-/// The Attributions card's **header band** — everything stacked above the
-/// credits list, including the divider under it and the three `space::SM`
-/// gaps those three rows sit on (`UIF-MOD-004`).
-///
-/// Every term is a token: the title's `TITLE_SM` line, the summary's
-/// `BODY` line, one `BORDER_HAIRLINE` divider and three `space::SM` gaps.
-/// The gaps are written out as three terms rather than as `3.0 * space::SM`
-/// **on purpose** — a coefficient is a numeric literal, and Rule B treats
-/// any literal in a visual-named constant as a violation unless the
-/// constant is registered. Writing the three terms keeps the composition
-/// literal-free, so the gate reads it as `TokenBound` on its own merits
-/// rather than by exemption, and the three terms are the three gaps,
-/// countable by eye.
-///
-/// The composition is **this card's** layout, not the framework's: the
-/// framework supplies the solver and the frame's padding, and only the
-/// host knows it renders a title, a summary line and one divider above the
-/// list. Keeping it here is what stops app layout knowledge leaking into
-/// `surface::modal`.
-///
-/// **Measured, not assumed:** with [`FOOTER_BAND_HEIGHT`] and the frame's
-/// padding this totals `150px`, and `480 - 150 = 330` is exactly the
-/// height the rendered card measures for the list. The sidecar pins both
-/// figures against a headless layout.
-pub const HEADER_BAND_HEIGHT: f32 = typography::TITLE_SM.line_height
-    + typography::BODY.line_height
-    + shape::BORDER_HAIRLINE
-    + space::SM
-    + space::SM
-    + space::SM;
-
-/// The Attributions card's **footer band** — the divider above the footer
-/// plus the footer control row plus the two `space::SM` gaps they sit on
-/// (`UIF-MOD-004`).
-///
-/// Literal-free for the same reason [`HEADER_BAND_HEIGHT`] is: one
-/// `BORDER_HAIRLINE`, a `size.control.md` footer row, and two `space::SM`
-/// gaps written out as two terms.
-pub const FOOTER_BAND_HEIGHT: f32 =
-    shape::BORDER_HAIRLINE + size::CONTROL_MD + space::SM + space::SM;
-
-/// The height the credits list is actually given, for a card of
-/// `card_height` (`UIF-MOD-004`).
-///
-/// Solved from the card's **solved** bounds through the framework's
-/// solver, then held down by the §2.2 cap. It is never the card's outer
-/// constant, and it never exceeds what the card has left:
-///
-/// ```text
-/// min( card_height - (header + 2 × padding + footer), ATTRIBUTIONS_LIST_MAX_HEIGHT )
-/// ```
-///
-/// Purity: pure function of `card_height`.
-#[must_use]
-pub fn credits_list_height(card_height: f32) -> f32 {
-    let bands = SubRegionBands::from_frame(&modal_frame())
-        .with_header(HEADER_BAND_HEIGHT)
-        .with_footer(FOOTER_BAND_HEIGHT);
-    subregion_height(card_height, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT)
-}
-
-/// The [`Length`] the credits list is rendered at, for a card of
-/// `card_height`.
-///
-/// `Fixed(solved)` whenever the solver found room. **The zero case falls
-/// back to `Fill`, and that is not a hedge — it is a measured iced
-/// behaviour.** `Length::Fixed(0.0)` is *void* in iced 0.14
-/// (`Size::is_void()` is true when either axis is `Fixed(0.0)`), and a
-/// void child is silently dropped from the widget tree. Verified here: at a
-/// 360×180 viewport the solved height is `0`, and with `Fixed(0.0)` the
-/// scrollable is not in the tree at all (`SelectorNotFound`), while with
-/// `Fill` it is present and measures `0.0`.
-///
-/// Losing the widget would break AGENTS §5 — `ATTRIBUTIONS_LIST_ID` is a
-/// stateful scrollable whose scroll position must survive a rebuild, and a
-/// widget that vanishes and returns under the same id starts fresh. It
-/// would also break §6's "do not let the layout collapse silently".
-///
-/// The fallback costs nothing in cap compliance: at zero room the two
-/// mechanisms agree on the height (zero), so `Fill` cannot exceed the cap
-/// there. The cap only ever binds where there *is* room, and that path is
-/// `Fixed`.
-///
-/// Purity: pure function of `card_height`.
-#[must_use]
-pub fn credits_list_length(card_height: f32) -> Length {
-    let solved = credits_list_height(card_height);
-    if solved > 0.0 {
-        Length::Fixed(solved)
-    } else {
-        Length::Fill
-    }
-}
 
 /// A snapshot of the third-party attribution catalog.
 ///
@@ -285,8 +163,8 @@ impl AttributionsViewModel {
         self.entries.is_empty()
     }
 
-    /// The summary line under the title: the count, or the empty-state
-    /// line when there is nothing to credit.
+    /// The summary line the host card renders under the credits header: the
+    /// count, or the empty-state line when there is nothing to credit.
     ///
     /// Folding the empty state into this line rather than swapping in a
     /// different widget keeps the card's widget tree constant (AGENTS §6).
@@ -298,85 +176,6 @@ impl AttributionsViewModel {
             strings::format_attribution_count(self.count())
         }
     }
-
-    /// Renders this snapshot as the framed attributions window
-    /// ([`attributions_view`]).
-    #[must_use]
-    pub fn view(&self, viewport: Size) -> Element<'_, Message> {
-        attributions_view(self, viewport)
-    }
-}
-
-/// Renders the framed third-party attributions window.
-///
-/// Title, count line, the scrollable three-column catalog and the shared
-/// Close footer, inside the §4.6.2 640×480 card. The list's height is
-/// **solved** from the card's solved bounds by [`credits_list_height`]
-/// (`UIF-MOD-004`) and capped at [`ATTRIBUTIONS_LIST_MAX_HEIGHT`],
-/// so the card's height is the frame's, not the content's, and the table
-/// is always allocated, empty or not.
-///
-/// Emitted messages:
-/// * a repository cell → [`AboutMessage::RepositoryOpened`]
-/// * the footer → [`AboutMessage::CloseRequested`]
-///
-/// Like [`crate::ui_iced::about::about_card`], this is a framed card:
-/// the root view centres it over the scrim with
-/// [`crate::ui_iced::overlay::modal_centered`], passing
-/// [`AboutMessage::Absorbed`] as the card-boundary message and
-/// [`AboutMessage::CloseRequested`] as the dismiss message.
-///
-/// Purity: pure view over `view_model` and `viewport`.
-#[must_use]
-pub fn attributions_view(
-    view_model: &AttributionsViewModel,
-    viewport: Size,
-) -> Element<'_, Message> {
-    let frame = modal_frame();
-    let card_size = attributions_card_size(viewport);
-
-    let title = rung(
-        strings::ABOUT_ATTRIBUTIONS_HEADER,
-        typography::TITLE_SM,
-        Palette::fastmd_dark().text_strong,
-    );
-
-    let summary = rung(
-        view_model.summary(),
-        typography::BODY,
-        Palette::fastmd_dark().text_muted,
-    );
-
-    let list = credits_list(
-        attribution_table(view_model.entries()),
-        credits_list_length(card_size.height),
-    );
-
-    let footer = Row::with_children(vec![
-        Space::new().width(Length::Fill).into(),
-        close_button(),
-    ])
-    .spacing(space::SM)
-    .align_y(Alignment::Center);
-
-    let body = Column::with_children(vec![
-        title.into(),
-        summary.into(),
-        modal_divider(frame).into(),
-        list.into(),
-        modal_divider(frame).into(),
-        footer.into(),
-    ])
-    .spacing(space::SM);
-
-    modal_card(
-        body,
-        frame,
-        ATTRIBUTIONS_CARD_ID,
-        Length::Fixed(card_size.width),
-        Length::Fixed(card_size.height),
-    )
-    .into()
 }
 
 /// Paints `value` on a type rung at its resting weight.
@@ -399,15 +198,20 @@ fn rung(
         .color(color)
 }
 
-/// The credits list, given the [`Length`] the solver says it gets.
+/// The credits list, given the [`Length`] the host card says it gets.
+///
+/// The [`Length`] is solved by the host — see
+/// [`crate::ui_iced::about::credits_list_length`] — because only the card
+/// knows what it has already spent above and below this scroll area. This
+/// module supplies the widget and its stable id; the host supplies the height.
 ///
 /// **`Length::Fixed(solved)`, not `Length::Fill` — and the reason is the
 /// §2.2 cap, not a dislike of `Fill`.** `Fill` was the right mechanism for
 /// the hazard the spec names: a remainder structurally cannot borrow the
-/// card's outer `480px` constant, so it cannot overflow past the header
-/// and footer bands. It is the wrong mechanism for the *positive* ask,
-/// because a remainder has no ceiling — in a 480px card it measured
-/// **330px** against the spec's **200px** cap.
+/// card's outer constant, so it cannot overflow past the header and footer
+/// bands. It is the wrong mechanism for the *positive* ask, because a
+/// remainder has no ceiling — in the retired 480px attributions card it
+/// measured **330px** against the spec's **200px** cap.
 ///
 /// iced 0.14 cannot express "fill, but not beyond N": `Length` is
 /// `Fill` / `FillPortion` / `Shrink` / `Fixed`, `Container` has no
@@ -417,7 +221,7 @@ fn rung(
 ///
 /// **Overflow safety is preserved by construction, not by luck.** The
 /// solved value is `min(remainder, cap)`, and the remainder is computed
-/// from the same band terms this `Column` actually consumes, so
+/// from the same band terms the host's `Column` actually consumes, so
 /// `solved + bands == the card's inner height` — the list lands exactly
 /// where `Fill` would have put it, never further. The safety property that
 /// `Fill` gave for free is now carried by the solver, and the sidecar
@@ -426,7 +230,8 @@ fn rung(
 /// understated band would over-solve and overflow where `Fill` could not
 /// have. That is the risk this change introduces, and it is why the layout
 /// tests assert the measured list bottom against the measured card bottom.
-fn credits_list<'a>(
+#[must_use]
+pub fn credits_list<'a>(
     table: Element<'a, Message>,
     length: Length,
 ) -> iced::widget::Scrollable<'a, Message> {

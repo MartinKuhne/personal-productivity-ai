@@ -137,10 +137,6 @@ fn test_debug_window_strings() {
 fn test_about_window_strings() {
     assert_eq!(ABOUT_VERSION_LABEL, "Version:");
     assert_eq!(
-        ABOUT_VIEW_ATTRIBUTIONS_BUTTON,
-        "View third-party attributions..."
-    );
-    assert_eq!(
         ABOUT_ATTRIBUTIONS_EMPTY,
         "No third-party dependencies recorded."
     );
@@ -169,9 +165,12 @@ fn test_format_attribution_count() {
         format_attribution_count(1),
         "1 direct third-party dependency"
     );
+    // Plural form at an arbitrary count. 61 is the shipped catalog's size, but
+    // this test is about the formatter; the catalog itself is pinned by
+    // `ui_iced::attributions::tests::from_catalog_is_the_shared_catalog_verbatim.
     assert_eq!(
-        format_attribution_count(57),
-        "57 direct third-party dependencies"
+        format_attribution_count(61),
+        "61 direct third-party dependencies"
     );
 }
 
@@ -182,7 +181,7 @@ fn test_hamburger_menu_strings() {
     assert_eq!(MENU_ABOUT, "About FastMD...");
     assert_eq!(ABOUT_EVENT, "about_button");
     assert_eq!(ABOUT_DIALOG_TITLE, "About FastMD");
-    assert_eq!(ABOUT_APP_NAME, "FastMD Viewer");
+    assert_eq!(ABOUT_APP_NAME, "FastMD AI");
     assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
     assert_eq!(MENU_WINDOWS, "Windows...");
     assert_eq!(MENU_WINDOWS_TITLE, "Windows");
@@ -218,7 +217,7 @@ fn test_agent_panel_prompt_strings() {
 #[test]
 fn test_ui_strings_use_phosphor_icons() {
     assert_eq!(
-        APP_TITLE, "FastMD Viewer",
+        APP_TITLE, "FastMD AI",
         "APP_TITLE is plain text; logo is rendered by the logo module"
     );
     assert!(

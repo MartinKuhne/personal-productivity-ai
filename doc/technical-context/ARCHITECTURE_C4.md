@@ -113,11 +113,11 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | --- | --- |
 | `hamburger.rs`, `context_menu.rs`, `menu_surface.rs` | `surface::menu` — `MenuCascade` openness controller, `model::{Menu, Row}`, `view` row matrix; `geometry::anchor` solves card placement and flips |
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
-| `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ResizeFloors` to bound a size the user dragged a card to, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
+| `about.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ResizeFloors` to bound a size the user dragged a card to, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
 | `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs`, `batch_dialog.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field, agent prompt and left-panel search; callback `TextInput::new` on log/debug search and the Batch wildcard-pattern field, omitted in Directory mode per SPEC `BATCH-007`); Batch prompt candidates are discovered on the iced task executor when the dialog opens, and `StartBatch` carries the selected prompt body snapshot; prompt discovery errors use error code `BATCH-4001` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
-| `attributions.rs` | `widget::hyperlink` |
+| `attributions.rs` | `widget::hyperlink` (the credits list is a **region of the About card**, not a card of its own: it takes its frame from `about::modal_frame()` and its height from the host) |
 | `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
 | `app.rs`, `update.rs`, `message.rs` | `surface::zorder` band model + `SurfaceRegistry`, `focus::FocusState`, `bridge::focus_task`, `geometry::clamp::ResizeHandle` |
 | every converted surface | `token::{space, size, shape, typography, color, contrast}`, `state::{BaseState, VisualState}` |
@@ -165,7 +165,7 @@ and the bottom command band. The middle band is an
 document/agent surface, and the gated table-of-contents pane. Pane-grid resize
 drags reduce 1:1 onto the pure `PanelLayout` widths, clamped by the UI-016
 min/max constants. Every floating surface (context menu, inline editor, small
-dialogs, log viewer, agent debug window, tools dialog, About, attributions,
+dialogs, log viewer, agent debug window, tools dialog, About,
 batch dialog) is mounted by a single **overlay host** above the bands in a
 fixed z-order, with a scrim layer that swallows input below the top card.
 
@@ -206,7 +206,7 @@ C4Component
   Component(movui, "movable_shell", "Movable card chrome driven by hoarfrost movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
   Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")
   Component(agentui, "agent", "Mounted agent panel: header/status, streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, hoarfrost controlled prompt field, send/queue/cancel + chat-model pick_list")
-  Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card; logs and agent_debug ride MovableHost")
+  Component(windows, "logs / agent_debug / dialogs / about / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card; logs and agent_debug ride MovableHost. attributions.rs sits beside them but is not a window — it renders the credits region the About card hosts")
   Component(persist, "persisted", "PersistedUiState save/restore through the injected UI-state storage handler")
   Component(tablew, "table_width (iced adapter)", "Available width -> FTWA solver inputs -> pinned iced column widths; heuristic text measurer")
   Component(gate, "token_lint_gate", "App-side token gate: hoarfrost's own scanner run over ui_iced under an app Scope (colour owner ui/theme.rs, visual scope ui_iced/, app geometry registry + enumerated allow-list)")

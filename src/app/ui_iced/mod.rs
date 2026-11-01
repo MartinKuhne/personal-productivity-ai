@@ -47,14 +47,15 @@
 //!   [`crate::ui_iced::dialogs::DialogState`] model with merged name
 //!   validation and cursor-anchored, clamped modal cards.
 //! - [`about`] — the About window: application identity, `build.rs`
-//!   metadata, the MIT license body and the entry point into the credits
-//!   list, as a pure [`crate::ui_iced::about::AboutViewModel`] snapshot
-//!   with the reducer-held
+//!   metadata, the MIT license body and the third-party credits list
+//!   rendered inline, as a pure [`crate::ui_iced::about::AboutViewModel`]
+//!   snapshot with the reducer-held
 //!   [`crate::ui_iced::about::AboutWindowState`].
-//! - [`attributions`] — the third-party credits window over the reused
+//! - [`attributions`] — the third-party credits table over the reused
 //!   `crate::ui::attributions::DIRECT_DEPENDENCIES` catalog: a scrollable
 //!   Crate / Authors / Repository table whose rows emit deferred
-//!   open-in-browser intent.
+//!   open-in-browser intent. It is a renderer the About card hosts, not a
+//!   window of its own.
 //! - [`batch_dialog`] — the Batch prompt-processing dialog: directory /
 //!   pattern / prompt / mode / concurrency composition over the reused
 //!   `BatchConfig` + `validate_batch_params`, the running/completed
@@ -101,7 +102,7 @@
 //!   toolbar, the middle pane grid (left tree / center document-or-agent /
 //!   gated ToC) and the bottom command band, under the overlay host that
 //!   stacks the context menu, editor, dialogs, log viewer, debug window,
-//!   tools, About, attributions and batch windows in a fixed draw order.
+//!   tools, About and batch windows in a fixed draw order.
 //! - [`os_shell`] — the framework-free platform wrappers the reducer calls:
 //!   open-in-system-editor, reveal-in-file-explorer and open-URL.
 //! - `test_helpers` — `#[cfg(test)]` framework-free fixtures that build a

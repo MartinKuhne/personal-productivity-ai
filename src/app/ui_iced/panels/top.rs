@@ -10,7 +10,7 @@
 //! # Shape
 //!
 //! ```text
-//! [logo] FastMD Viewer | <indexing status> [tag filter]        [☰ menu]
+//! [logo] FastMD AI | <indexing status> [tag filter]        [☰ menu]
 //! ```
 //!
 //! * **Logo** — the shared stand-in built by

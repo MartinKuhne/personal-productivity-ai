@@ -7,11 +7,13 @@
 /// The Document + Bolt logo is rendered separately via
 /// [`crate::ui_iced::logo::logo_mark`]; the title itself is plain text so it
 /// remains searchable and accessible.
-pub const APP_TITLE: &str = "FastMD Viewer";
+pub const APP_TITLE: &str = "FastMD AI";
 
 /// Title of the OS window title bar ("FastMD AI").
-/// Distinct from [`APP_TITLE`]: the top toolbar keeps showing [`APP_TITLE`]
-/// and the About dialog keeps [`ABOUT_APP_NAME`].
+/// The three identity strings — the toolbar's [`APP_TITLE`], this window title
+/// and the About dialog's [`ABOUT_APP_NAME`] — all read
+/// "FastMD AI"; they stay separate constants because each band may one day need
+/// its own wording, not because they differ today.
 pub const WINDOW_TITLE: &str = "FastMD AI";
 
 /// Label for the batch prompt processing button.
@@ -37,7 +39,7 @@ pub const MENU_ABOUT: &str = "About FastMD...";
 pub const ABOUT_DIALOG_TITLE: &str = "About FastMD";
 
 /// Application name displayed in the about dialog header.
-pub const ABOUT_APP_NAME: &str = "FastMD Viewer";
+pub const ABOUT_APP_NAME: &str = "FastMD AI";
 
 /// Copyright notice displayed in the about dialog header.
 pub const ABOUT_COPYRIGHT: &str = "Copyright (c) 2026 Martin Kuhne";
@@ -89,15 +91,11 @@ pub const ABOUT_VERSION_LABEL: &str = "Version:";
 /// never drift.
 pub const ABOUT_DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 
-/// Button in the About window that opens the third-party attributions
-/// window.
-pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON: &str = "View third-party attributions...";
-
 /// Empty-state line for the attributions list.
 pub const ABOUT_ATTRIBUTIONS_EMPTY: &str = "No third-party dependencies recorded.";
 
-/// Formats the third-party dependency counter shown under the About
-/// window's attributions teaser and the credits window title.
+/// Formats the third-party dependency counter the About card renders above
+/// its inline credits list.
 pub fn format_attribution_count(count: usize) -> String {
     if count == 1 {
         format!("{count} direct third-party dependency")
@@ -599,7 +597,7 @@ pub const SELECT_DESTINATION_FOLDER: &str = "Select destination folder:";
 /// Generic OK button label.
 pub const OK_BUTTON: &str = "Ok";
 
-/// Generic Close button label (the About and attributions window footers).
+/// Generic Close button label (the About card footer).
 pub const CLOSE_BUTTON: &str = "Close";
 
 /// Window title for create directory dialog.
@@ -822,10 +820,6 @@ pub fn movable_row_count(count: usize) -> String {
 /// which is the *menu* entry that opens it. The card's own title bar names
 /// the surface, not the command.
 pub const BACKGROUND_LOGS_WINDOW: &str = "Background Operations Log";
-
-/// Label of the `Dock` trailing action in a movable card's title bar
-/// (§4.7.1, `UIF-MOV-001`).
-pub const MOVABLE_DOCK_BUTTON: &str = "Dock";
 
 /// Tooltip on a movable card's title bar, naming the drag affordance
 /// (`UIF-MOV-001`).

@@ -15,7 +15,7 @@
 // `hoarfrost::token` test modules use.
 #![allow(clippy::assertions_on_constants)]
 
-use super::{close_action, content_viewport_id, dock_action};
+use super::{close_action, content_viewport_id};
 use crate::ui::strings;
 use crate::ui_iced::message::MovableCard;
 use hoarfrost::focus::FocusState;
@@ -237,25 +237,123 @@ fn close_action_carries_a_tooltip_so_icon_only_layout_is_legal() {
     );
 }
 
-/// Sibling guard for the other trailing action in the same bar: `Dock` is a
-/// readable label, so its content box clears the icon-only floor and the
-/// tooltip rule never engages. Pinned so a later change to the label, the
-/// rung, or the floor cannot silently make this control the next defect #18.
-#[test]
-fn dock_action_stays_legal_because_it_is_a_labelled_button() {
-    let button = dock_action(MovableCard::Logs);
+/// The shell under test, painted at a known size with a trivial status line,
+/// so a test can measure the bands it lays out instead of restating them.
+fn shell_for(host: &MovableHost) -> iced::Element<'static, crate::ui_iced::message::Message> {
+    use crate::ui_iced::movable_shell::movable_shell;
+    use iced::widget::{Row, container, text};
 
-    // "Dock" at the body rung is comfortably wider than the 28 px floor.
-    let labelled = Size::new(32.0, 16.0);
+    movable_shell(
+        host,
+        MovableCard::AgentDebug,
+        Row::new().push(text("controls")),
+        container(text("content band")).into(),
+        text("3 entries").into(),
+    )
+}
+
+/// The laid-out bounds of the footer's painted ◢ glyph.
+fn painted_grip_bounds(
+    sim: &mut iced_test::Simulator<
+        '_,
+        crate::ui_iced::message::Message,
+        iced::Theme,
+        iced::Renderer,
+    >,
+) -> Rectangle {
+    sim.find(
+        |candidate: iced_test::selector::Candidate<'_>| match candidate {
+            iced_test::selector::Candidate::Text {
+                content, bounds, ..
+            } if content == strings::ICON_RESIZE_GRIP => Some(bounds),
+            _ => None,
+        },
+    )
+    .expect("the footer paints the resize grip glyph")
+}
+
+/// Defect: the footer painted ◢ at the end of the padded status row, 12 px
+/// inside the card's corner, while the host hit-tests the corner itself
+/// (`resize_grip(BottomRight)`). Every press on the *visible* grip landed in
+/// `Zone::Footer` and was absorbed, so the card never resized.
+///
+/// The affordance and the hit box must be one rectangle. This measures the
+/// glyph out of a real layout and compares it with the host's own grip
+/// rectangle, both expressed relative to the card's top-left — the shell
+/// paints the card at its own origin and [`movable_layer`] places it.
+#[test]
+fn the_painted_grip_sits_on_the_hosts_resize_rectangle() {
+    let host = host(680.0, 440.0, viewport());
+    let mut sim = iced_test::simulator(shell_for(&host));
+
+    let card = sim
+        .find(content_viewport_id(MovableCard::AgentDebug))
+        .expect("the shell's own container carries the card's viewport id")
+        .bounds();
+    let grip = host
+        .resize_grip(hoarfrost::geometry::clamp::ResizeHandle::BottomRight)
+        .expect("bottom-right grip exists");
+    let glyph = painted_grip_bounds(&mut sim);
+
+    // The host reports root-space rectangles and the shell is laid out here at
+    // the layout origin, so the host's rectangle is shifted by however far the
+    // card actually landed — `movable_layer` performs the same shift in the app.
+    let origin = host.card().position();
+    let shift = Point::new(card.x - origin.x, card.y - origin.y);
+    let grip = Rectangle::new(Point::new(grip.x + shift.x, grip.y + shift.y), grip.size());
+
+    let centre = glyph.center();
     assert!(
-        !button.is_icon_only(labelled),
-        "a labelled control wider than the icon-only floor must not read as icon-only"
+        grip.contains(centre),
+        "the grip glyph's centre {centre:?} must land inside the host's hit box \
+         {grip:?}: a press on what the user can see has to be a press on what the \
+         host resizes from"
     );
-    assert_eq!(
-        button.tooltip_violation(labelled),
-        None,
-        "defect #18 regression guard: the Dock action must stay legal at its real \
-         content size"
+    assert!(
+        glyph.x >= grip.x - 0.5
+            && glyph.y >= grip.y - 0.5
+            && glyph.x + glyph.width <= grip.x + grip.width + 0.5
+            && glyph.y + glyph.height <= grip.y + grip.height + 0.5,
+        "the whole glyph {glyph:?} must sit inside the hit box {grip:?}, otherwise part \
+         of the affordance is a press the host absorbs"
+    );
+}
+
+/// Whether the laid-out tree paints `needle` as text anywhere.
+fn paints_text(
+    sim: &mut iced_test::Simulator<
+        '_,
+        crate::ui_iced::message::Message,
+        iced::Theme,
+        iced::Renderer,
+    >,
+    needle: &str,
+) -> bool {
+    let needle = needle.to_owned();
+    sim.find(
+        move |candidate: iced_test::selector::Candidate<'_>| match candidate {
+            iced_test::selector::Candidate::Text { content, .. } if content == needle => Some(()),
+            _ => None,
+        },
+    )
+    .is_ok()
+}
+
+/// The title bar's trailing cluster carries `Close ×` and nothing else: the
+/// `Dock` control was removed because no dock behaviour exists, and a button
+/// that does nothing is worse than no button.
+#[test]
+fn the_title_bar_surfaces_close_only_and_no_dock_control() {
+    let host = host(680.0, 440.0, viewport());
+    let mut sim = iced_test::simulator(shell_for(&host));
+
+    assert!(
+        !paints_text(&mut sim, "Dock"),
+        "the inert Dock control must not be painted"
+    );
+    assert!(
+        paints_text(&mut sim, super::CLOSE_GLYPH),
+        "Close must still be surfaced"
     );
 }
 

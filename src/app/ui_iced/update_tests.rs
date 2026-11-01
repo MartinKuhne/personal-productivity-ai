@@ -30,7 +30,7 @@ use crate::ui_iced::message::BootMessage;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
 use hoarfrost::surface::menu::model::{Row, submenu_id};
 use iced::widget::pane_grid::ResizeEvent;
-use iced::{Point, Size};
+use iced::{Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -2616,17 +2616,22 @@ fn test_cancel_and_dismiss_both_close_the_dialog_without_publishing() {
 // ───────────────────────────── About / Batch / Tools / Debug ─────────────────────────────
 
 #[test]
-fn test_about_attributions_request_switches_the_window() {
+fn test_about_repository_press_keeps_the_card_open() {
     let (mut state, _storage) = fresh_state();
     state.overlay.about.open_about();
 
     let _ = update(
         &mut state,
-        Message::About(AboutMessage::AttributionsRequested),
+        Message::About(AboutMessage::RepositoryOpened {
+            url: "https://github.com/dtolnay/anyhow".into(),
+        }),
     );
 
-    assert!(state.overlay.about.is_attributions());
-    assert!(!state.overlay.about.is_about());
+    // The credits list is rendered **inside** the About card, so a row press
+    // is a deferred open-in-browser intent and nothing else: it must not
+    // switch to a second window and must not dismiss the card.
+    assert!(state.overlay.about.is_about());
+    assert_eq!(state.mounted_layers(), vec![OverlayLayer::About]);
 }
 
 #[test]
@@ -5018,11 +5023,12 @@ fn pointer(state: &mut AppState, message: MovableMessage) -> Task<Message> {
 
 /// Reports a pointer position the way the root mouse area does.
 ///
-/// [`reduce_movable`] takes every press and move coordinate from the overlay's
-/// own `cursor` field and never from the `MovableMessage::Moved` payload —
-/// `mouse_area::on_press` carries no point in iced 0.14 — so a gesture test has
-/// to drive this lane exactly as the live view does, or the host never sees the
-/// coordinate the test thinks it sent.
+/// [`reduce_movable`] positions a press from the overlay's own `cursor` field
+/// — `mouse_area::on_press` carries no point in iced 0.14 — and this lane is
+/// one of the two writers of that field. The other is the card's own
+/// `MovableMessage::Moved`, which is the one that matters over the card: the
+/// root area goes silent there because iced levitates the cursor past layers
+/// below one that claims a mouse interaction.
 fn report_pointer(state: &mut AppState, at: Point) {
     let _ = update(
         state,
@@ -5277,31 +5283,243 @@ fn test_a_body_press_moves_nothing_and_arms_no_gesture() {
     );
 }
 
+// ─────────────────── the ◢ gesture, driven through the real view ───────────────────
+//
+// Tier 2 on purpose. The defect was that the footer *painted* its grip
+// somewhere the host would not accept a press, which only shows up once the
+// shell's own layout is what is under the pointer: a reducer-level test can
+// name any coordinate it likes and passes either way.
+
+/// A pointer-move event at `at`.
+fn mouse_move(at: Point) -> iced::Event {
+    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at })
+}
+
+/// A left-button press at wherever the pointer currently is.
+fn mouse_press() -> iced::Event {
+    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left))
+}
+
+/// A left-button release at wherever the pointer currently is.
+fn mouse_release() -> iced::Event {
+    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Left,
+    ))
+}
+
+/// One frame of the **real** [`view`](crate::ui_iced::view::view), driven by
+/// real iced events, with every message the frame produced fed back through
+/// [`update`].
+///
+/// A fresh simulator per batch: the gesture-capture lane is mounted only while
+/// a host holds the pointer, so the tree the next batch meets is not the tree
+/// the previous one saw.
+fn drive_real_frame(
+    state: &mut AppState,
+    at: Point,
+    events: impl IntoIterator<Item = iced::Event>,
+) -> Vec<Message> {
+    let messages = {
+        let mut ui = iced_test::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            state.viewport,
+            crate::ui_iced::view::view(state),
+        );
+        ui.point_at(at);
+        let _ = ui.simulate(events);
+        ui.into_messages().collect::<Vec<_>>()
+    };
+    for message in messages.clone() {
+        let _ = update(state, message);
+    }
+    messages
+}
+
+/// The centre of the ◢ the shell actually paints, measured out of a real frame
+/// — the pixel the user aims at, not the one a constant implies.
+fn painted_grip_centre(state: &AppState) -> Point {
+    let mut ui = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        state.viewport,
+        crate::ui_iced::view::view(state),
+    );
+    ui.find(
+        |candidate: iced_test::selector::Candidate<'_>| match candidate {
+            iced_test::selector::Candidate::Text {
+                content, bounds, ..
+            } if content == crate::ui::strings::ICON_RESIZE_GRIP => Some(bounds.center()),
+            _ => None,
+        },
+    )
+    .expect("the mounted card paints the ◢ resize grip")
+}
+
+/// How far the shared grip gesture drags the handle outward.
+const GRIP_DRAG: (f32, f32) = (120.0, 90.0);
+
+/// Presses the painted grip of `card`, drags it outward and releases, all
+/// through the real view, and returns the rectangle before the press and the
+/// one the release settled on.
+///
+/// The assertions along the way are the diagnosis, not decoration: each one
+/// fails at the exact link in the chain that broke — paint, routing, the
+/// host's zone, then the geometry itself.
+fn resize_card_by_its_painted_grip(
+    state: &mut AppState,
+    card: MovableCard,
+) -> (Rectangle, Rectangle) {
+    let before = movable_host(state, card).card();
+    let grab = painted_grip_centre(state);
+
+    assert!(
+        movable_host(state, card)
+            .resize_grip(ResizeHandle::BottomRight)
+            .expect("the bottom-right handle has a grip")
+            .contains(grab),
+        "{card:?}: the ◢ painted at {grab:?} must sit inside the rectangle the host \
+         hit-tests — a press on the visible handle has to be a press the host accepts"
+    );
+
+    let pressed = drive_real_frame(state, grab, [mouse_move(grab), mouse_press()]);
+    assert!(
+        pressed.iter().any(|message| matches!(
+            message,
+            Message::Movable(MovableMessage::GripPressed {
+                card: kind,
+                handle: ResizeHandle::BottomRight,
+            }) if *kind == card
+        )),
+        "{card:?}: pressing the painted grip must report a bottom-right grip press, got {pressed:?}"
+    );
+    assert_eq!(
+        movable_host(state, card).resizing_handle(),
+        Some(ResizeHandle::BottomRight),
+        "{card:?}: a press on the painted grip must arm the resize on that handle"
+    );
+
+    let grown = Point::new(grab.x + GRIP_DRAG.0, grab.y + GRIP_DRAG.1);
+    let _ = drive_real_frame(state, grown, [mouse_move(grown)]);
+    let mid_drag = movable_host(state, card).card();
+    assert!(
+        mid_drag.width > before.width && mid_drag.height > before.height,
+        "{card:?}: dragging the grip outward must grow the card, {before:?} -> {mid_drag:?}"
+    );
+
+    let _ = drive_real_frame(state, grown, [mouse_release()]);
+    (before, movable_host(state, card).card())
+}
+
+/// Defect: the footer's ◢ did nothing. The Background Operations Log now
+/// grows from the handle the user can see, and the release persists it.
 #[test]
-fn test_a_dock_press_leaves_the_card_geometry_alone() {
+fn test_the_log_cards_painted_grip_resizes_it_and_the_release_persists() {
+    let (mut state, storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+
+    let (before, after) = resize_card_by_its_painted_grip(&mut state, MovableCard::Logs);
+
+    assert_eq!(
+        after.size(),
+        Size::new(before.width + GRIP_DRAG.0, before.height + GRIP_DRAG.1),
+        "the card must follow the pointer exactly, {before:?} -> {after:?}"
+    );
+    assert!(
+        !logs_host(&state).is_capturing() && !logs_host(&state).is_dragging(),
+        "the release must end the gesture and drop the pointer capture"
+    );
+
+    let key = logs_host(&state).storage_key();
+    assert_eq!(
+        state
+            .app
+            .persisted_ui_state
+            .overlay_geometry
+            .get(&key)
+            .map(String::as_str),
+        Some(logs_host(&state).geometry().encode().as_str()),
+        "the settled geometry must be remembered under the card's own key"
+    );
+    assert!(
+        storage.saved_json().is_some(),
+        "and settling must write through the injected storage handler, not just the model"
+    );
+}
+
+/// The same gesture on the second card, so the shared shell is proven shared
+/// and not fixed for one caller only.
+#[test]
+fn test_the_debug_inspectors_painted_grip_resizes_it_and_the_release_persists() {
+    let (mut state, storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_debug_card(&mut state);
+
+    let (before, after) = resize_card_by_its_painted_grip(&mut state, MovableCard::AgentDebug);
+
+    assert_eq!(
+        after.size(),
+        Size::new(before.width + GRIP_DRAG.0, before.height + GRIP_DRAG.1),
+        "the card must follow the pointer exactly, {before:?} -> {after:?}"
+    );
+    assert!(
+        !debug_host(&state).is_capturing(),
+        "the release must drop the pointer capture"
+    );
+
+    let key = debug_host(&state).storage_key();
+    assert_eq!(
+        state
+            .app
+            .persisted_ui_state
+            .overlay_geometry
+            .get(&key)
+            .map(String::as_str),
+        Some(debug_host(&state).geometry().encode().as_str()),
+        "the settled geometry must be remembered under the card's own key"
+    );
+    assert!(
+        storage.saved_json().is_some(),
+        "and settling must write through the injected storage handler"
+    );
+}
+
+/// A `Moved` on its own has to leave the *next* press positioned correctly,
+/// because `mouse_area::on_press` carries no coordinate and the base-layer
+/// cursor goes silent over the card (iced levitates the cursor past layers
+/// below one that claims an interaction). This is the reducer half of the fix.
+#[test]
+fn test_a_reported_move_positions_the_press_that_follows_it() {
     let (mut state, _storage) = fresh_state();
     state.viewport = ROOMY_VIEWPORT;
     open_logs_card(&mut state);
-    let before = logs_host(&state).card();
-    let actions = logs_host(&state).trailing_actions();
-    report_pointer(&mut state, Point::new(actions.x + 5.0, actions.y + 5.0));
+    // Deliberately wrong: if the reducer still read the stored cursor, the
+    // press would land here instead of where the card's own lane reported.
+    report_pointer(&mut state, Point::new(5.0, 5.0));
 
-    let task = pointer(
+    let grip = logs_host(&state)
+        .resize_grip(ResizeHandle::BottomRight)
+        .expect("the bottom-right handle has a grip");
+    let at = grip.center();
+
+    let _ = pointer(
         &mut state,
-        MovableMessage::DockRequested {
+        MovableMessage::Moved {
             card: MovableCard::Logs,
+            at,
+        },
+    );
+    let _ = pointer(
+        &mut state,
+        MovableMessage::GripPressed {
+            card: MovableCard::Logs,
+            handle: ResizeHandle::BottomRight,
         },
     );
 
-    assert_eq!(task.units(), 0, "a dock press schedules nothing");
     assert_eq!(
-        logs_host(&state).card(),
-        before,
-        "the dock action is a title-bar control, not a geometry gesture"
-    );
-    assert!(
-        !logs_host(&state).is_dragging() && !logs_host(&state).is_capturing(),
-        "a dock press must not arm a gesture"
+        logs_host(&state).resizing_handle(),
+        Some(ResizeHandle::BottomRight),
+        "the press must be positioned from the move the card itself reported"
     );
 }
 

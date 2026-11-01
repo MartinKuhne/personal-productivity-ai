@@ -2347,8 +2347,8 @@ const SPEC_COVERAGE: &[Coverage] = &[
              everything it has. `ATTRIBUTIONS_LIST_MAX_HEIGHT = 200` is defined \
              and registered in `SURFACE_GEOMETRY_CONSTANTS`, and the credits \
              list is wired to it. Band terms are token-resolved by the host \
-             (`ui_iced/attributions.rs`: `HEADER_BAND_HEIGHT`, \
-             `FOOTER_BAND_HEIGHT`) because `ModalFrame` deliberately carries no \
+             (`ui_iced/about.rs`: `ABOUT_CREDITS_HEADER_BAND_HEIGHT`, \
+             `ABOUT_CREDITS_FOOTER_BAND_HEIGHT`) because `ModalFrame` deliberately carries no \
              header/footer sub-rectangles — it supplies `body_padding` via \
              `from_frame` and nothing else. Two deviations from the \
              requirement's letter: the constant is `_HEIGHT`, not the spec's \

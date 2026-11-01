@@ -71,7 +71,7 @@ fn one_message_per_channel() -> Vec<Message> {
         Message::Dialog(DialogMessage::NameChanged {
             text: "my note".into(),
         }),
-        Message::About(AboutMessage::AttributionsRequested),
+        Message::About(AboutMessage::Absorbed),
         Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 3 }),
         Message::Inbound(InboundMessage::EventsDropped {
             source: BusSource::Agent,
@@ -590,10 +590,11 @@ fn test_dialog_channel_covers_every_small_dialog_interaction() {
 
 #[test]
 fn test_about_channel_covers_every_identity_window_interaction() {
-    // The About + attributions windows' view-local
-    // transitions and deferred intents. Each stays separable so the
-    // reducer can route it.
-    let attributions = Message::About(AboutMessage::AttributionsRequested);
+    // The About card's view-local transitions and deferred intents — the
+    // credits list is inside the card now, so its repository row is the only
+    // credits-specific interaction left on this channel. Each stays
+    // separable so the reducer can route it.
+    let absorbed = Message::About(AboutMessage::Absorbed);
     let copy_hash = Message::About(AboutMessage::CopyCommitHashRequested);
     let repo = Message::About(AboutMessage::RepositoryOpened {
         url: "https://github.com/dtolnay/anyhow".into(),
@@ -601,7 +602,7 @@ fn test_about_channel_covers_every_identity_window_interaction() {
     let close = Message::About(AboutMessage::CloseRequested);
 
     let all = [
-        attributions.clone(),
+        absorbed.clone(),
         copy_hash.clone(),
         repo.clone(),
         close.clone(),
@@ -1523,7 +1524,7 @@ fn test_movable_channel_names_its_card_in_every_variant() {
     assert_clone::<MovableMessage>();
 
     for card in [MovableCard::Logs, MovableCard::AgentDebug] {
-        let events: [(&str, MovableMessage); 7] = [
+        let events: [(&str, MovableMessage); 6] = [
             (
                 "Moved",
                 MovableMessage::Moved {
@@ -1540,7 +1541,6 @@ fn test_movable_channel_names_its_card_in_every_variant() {
                     handle: ResizeHandle::BottomRight,
                 },
             ),
-            ("DockRequested", MovableMessage::DockRequested { card }),
             ("CloseRequested", MovableMessage::CloseRequested { card }),
             ("Released", MovableMessage::Released { card }),
         ];
@@ -1561,7 +1561,7 @@ fn test_movable_channel_names_its_card_in_every_variant() {
 fn test_movable_events_for_different_cards_are_never_equal() {
     // The reducer picks the host from the message alone, so a Logs gesture must
     // never be mistaken for the same gesture on the Agent Debug card.
-    let pairs: [(&str, MovableMessage, MovableMessage); 7] = [
+    let pairs: [(&str, MovableMessage, MovableMessage); 6] = [
         (
             "Moved",
             MovableMessage::Moved {
@@ -1600,15 +1600,6 @@ fn test_movable_events_for_different_cards_are_never_equal() {
             MovableMessage::GripPressed {
                 card: MovableCard::AgentDebug,
                 handle: ResizeHandle::Right,
-            },
-        ),
-        (
-            "DockRequested",
-            MovableMessage::DockRequested {
-                card: MovableCard::Logs,
-            },
-            MovableMessage::DockRequested {
-                card: MovableCard::AgentDebug,
             },
         ),
         (

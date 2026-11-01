@@ -97,7 +97,8 @@ pub enum Message {
     /// Small individual dialogs — create-directory / create-document /
     /// rename / move / delete-confirmation (UI-011/UI-015).
     Dialog(DialogMessage),
-    /// The About window and the third-party attributions window.
+    /// The About card: identity rows, build metadata and the third-party
+    /// credits list rendered inside it.
     About(AboutMessage),
     /// The batch prompt-processing dialog's own selection state
     /// (BATCH-001..BATCH-014).
@@ -829,7 +830,8 @@ pub enum DialogMessage {
     },
 }
 
-/// About / attributions window channel.
+/// About window channel — the identity card that carries the third-party
+/// credits list inline.
 ///
 /// This is a **separate channel from [`DialogMessage`]**, on purpose:
 /// `DialogMessage`'s vocabulary is name-entry shaped (`NameChanged`,
@@ -844,14 +846,10 @@ pub enum DialogMessage {
 /// (`src/app/bus/events/user_command.rs:68`), which the hamburger emits
 /// (`ui_iced/panels/top.rs:439`). The reducer maps that command onto
 /// [`crate::ui_iced::about::AboutWindowState::open_about`]. What lives
-/// here is only what the rendered cards can do to *their own* visibility
-/// and the side effects iced only allows in `update`.
+/// here is only what the rendered card can do to *its own* visibility and
+/// the side effects iced only allows in `update`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AboutMessage {
-    /// The "View third-party attributions…" button was pressed in the
-    /// About card — show
-    /// [`crate::ui_iced::attributions::attributions_view`].
-    AttributionsRequested,
     /// The commit-hash cell was clicked; iced exposes the clipboard only to
     /// `update` (`iced_core-0.14.0/src/clipboard.rs`), so the reducer
     /// performs the write. The cell never emits this on an `"unknown"`
@@ -867,10 +865,10 @@ pub enum AboutMessage {
         /// The repository URL to open.
         url: String,
     },
-    /// The Close button, a scrim click or Escape — hide whichever identity
-    /// window is showing. Kept as one variant because the two windows are
-    /// mutually exclusive, so the reducer needs exactly one "hide it"
-    /// transition ([`crate::ui_iced::about::AboutWindowState::close`]).
+    /// The Close button, a scrim click or Escape — hide the identity card.
+    /// One variant because there is one window and the reducer needs exactly
+    /// one "hide it" transition
+    /// ([`crate::ui_iced::about::AboutWindowState::close`]).
     CloseRequested,
     /// A press landed inside the open card's perimeter but on nothing that
     /// acts — its padding ring, dead space between sections, or a
@@ -1409,6 +1407,14 @@ pub enum MovableCard {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MovableMessage {
     /// The pointer moved over the card; `at` is in root/window coordinates.
+    ///
+    /// Every lane that publishes this message adds its own band's origin to
+    /// the point iced hands it (`mouse_area.rs:358` reports a point relative
+    /// to the widget's own bounds), so the reducer can feed `at` straight to
+    /// the host. It must: the app's only other root-space cursor comes from
+    /// the base layer, and iced's `Stack` levitates the cursor past every
+    /// layer below one that claims a mouse interaction
+    /// (`stack.rs:266-273`) — which the title bar and the grip both do.
     Moved {
         /// Which card.
         card: MovableCard,
@@ -1430,12 +1436,6 @@ pub enum MovableMessage {
     /// A press landed on the card's body, claimed by no inner control
     /// (`UIF-MOV-003` click-promotion).
     BodyPressed {
-        /// Which card.
-        card: MovableCard,
-    },
-    /// The `Dock` trailing action in the title bar was pressed
-    /// (`UIF-MOV-001`).
-    DockRequested {
         /// Which card.
         card: MovableCard,
     },
@@ -1461,7 +1461,6 @@ impl MovableMessage {
             | Self::TitlePressed { card }
             | Self::BodyPressed { card }
             | Self::GripPressed { card, .. }
-            | Self::DockRequested { card }
             | Self::CloseRequested { card }
             | Self::Released { card } => *card,
         }

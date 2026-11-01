@@ -24,23 +24,55 @@
 //! | # | Column | iced widget | Width |
 //! | --- | --- | --- | --- |
 //! | 1 | enable checkbox | `checkbox` + `.on_toggle` (`iced_widget-0.14.2/src/checkbox.rs:119`, `:155`) | `Shrink` |
-//! | 2 | group | strong `text` name (the error rides the `⚠` tooltip, not this cell) | `Fill` |
+//! | 2 | group | strong `text` name (the error rides the `⚠` tooltip, not this cell) | `Shrink` |
 //! | 3 | kind | `text` from [`kind_label`] | `Shrink` |
-//! | 4 | tools | comma-joined `text` | `Fill` |
+//! | 4 | tools | comma-joined `text`, wrapped at [`TOOLS_CELL_MAX_WIDTH`] (see the `tools_cell` builder) | `Fill` + `max_width` cap |
 //! | 5 | prompt char count | `text` of the summed count + the `✓ parallel` chip (see below) | `Shrink` |
-//! | 6 | actions | `Row` of [`ToolAction`] buttons, led by the `⚠` tooltip marker | `Fill` |
+//! | 6 | actions | `Row` of [`ToolAction`] buttons, led by the `⚠` tooltip marker | `Shrink` |
+//!
+//! # Content-hugging columns — why the table itself is `Shrink`
+//!
+//! The owner's ruling on the column-width defect: *no column may take more
+//! space than its content does; the leftover width belongs at the table's
+//! trailing edge.* iced 0.14's `table` lays out in two passes: pass 1
+//! measures every non-fluid (`Shrink`/`Fixed`) cell and records the column
+//! widths (`table.rs:261-316`); pass 2 lays out the fluid (`Fill`) cells
+//! with `max_width = width_unit * factor`, where `width_unit` is the whole
+//! leftover width divided by the summed fill factors (`table.rs:318-340`).
+//! A `Fill` column therefore always consumes all leftover width — it can
+//! never hug content, which is exactly the gulf the three old `Fill`
+//! columns produced.
+//!
+//! The lever is the table widget's **own** width: in pass 2 the resolved
+//! cell size is `limits.resolve(if Fixed {width} else {table_fluid},
+//! Length::Shrink, layout.size())` where `table_fluid =
+//! self.width.fluid()` (`table.rs:399-407`, `:245`), and
+//! `Length::Shrink.fluid()` is `false`. Declaring the table
+//! `Length::Shrink` therefore makes the fluid tools column resolve to its
+//! measured content size instead of its allotment, and the whole table
+//! becomes content-width and left-aligned inside the (still `Fill`)
+//! scrollable.
+//!
+//! The tools column stays the one `Fill` declaration for two reasons: it
+//! is the only unbounded cell, and `Table::new` promotes column 0 from
+//! `Shrink` to `Fill` when *every* column is `Shrink` (`table.rs:129-133`)
+//! — keeping one non-`Shrink` declaration means the checkbox column can
+//! never swallow the slack. Its cell is a `Shrink` container with
+//! `.max_width(TOOLS_CELL_MAX_WIDTH)` (`container.rs:133`), so it measures
+//! `min(natural, cap)` and long tool lists wrap at the cap rather than
+//! stretching the column or overflowing the card.
 //!
 //! Verified `iced::widget::table` API: `table(columns, rows)`
 //! `iced_widget-0.14.2/src/table.rs:18-28`, `column(header, view)`
-//! `:34-49`, `Column::width` `:650-653`, and the all-`Shrink` promotion
-//! rule `:129-133` (three explicit `Fill`s here keep the wide columns
-//! wide and the short ones tight).
+//! `:34-49`, `Column::width` `:650-653`, `Column::align_y` `:664-671`, and
+//! the all-`Shrink` promotion rule `:129-133`.
 //!
 //! There is no row striping and no user-resizable column: iced 0.14's
 //! `table` exposes only `separator_x`/`separator_y` in its style
 //! (`table.rs:676-681`), and `Column` takes a single `Length` with no
-//! minimum. Column proportions are therefore expressed as `Fill`/`Shrink`
-//! ratios rather than pixel floors.
+//! minimum. Column widths are therefore content-hugs (or, for the tools
+//! cell, a content-hug capped at [`TOOLS_CELL_MAX_WIDTH`]) rather than
+//! pixel floors.
 //!
 //! # Error highlighting — which token, and why two
 //!
@@ -93,6 +125,7 @@ use iced::widget::{Column, Row, Space, container, mouse_area, scrollable, stack,
 use iced::{Alignment, Background, Element, Length, Point, Size};
 
 use hoarfrost::composite::list_tile;
+use hoarfrost::geometry::CENTER_PANE_MIN_W;
 use hoarfrost::surface::modal::{
     AxisPolicy, Cap, Desired, EDITOR_WIDTH_MIN, ErrorLocation, ModalError, ModalFrame, ModalSizing,
     Recovery, ResizeFloors, TOOLS_HEIGHT_MIN,
@@ -109,7 +142,8 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::overlay::{
-    modal_card, modal_centered, modal_divider, modal_resize_capture_layer, modal_resize_grip,
+    MODAL_PADDING, modal_card, modal_centered, modal_divider, modal_resize_capture_layer,
+    modal_resize_grip,
 };
 
 /// Tool-group identity, kind and state — reused unchanged from the tool
@@ -174,6 +208,11 @@ pub const TOOLS_CARD_ID: &str = "tools.card";
 /// set changes or an error banner appears above it.
 pub const TOOLS_LIST_ID: &str = "tools.list";
 
+/// Stable id of the table box inside the group list, so a layout test can
+/// measure the table's own content-hugging width rather than only its
+/// cells — the same reason [`TOOLS_CARD_ID`] exists (AGENTS §5).
+pub const TOOLS_TABLE_ID: &str = "tools.table";
+
 /// Stable focus id of the error banner's `Retry` control.
 pub const TOOLS_ERROR_RETRY_ID: &str = "tools.error.retry";
 
@@ -233,6 +272,36 @@ pub fn resize_storage_key() -> String {
 ///   80%. The only ceiling is the framework's `VIEWPORT_GUTTER`, which
 ///   [`ResizeFloors`] applies last and which always wins.
 pub const TOOLS_RESIZE_FLOORS: ResizeFloors = ResizeFloors::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN);
+
+/// The wrap boundary of the Tools column's cell — the one column on this
+/// card whose content has no natural ceiling.
+///
+/// Once the table hugs its content (see the module header), an unbounded
+/// comma-joined tool list would otherwise stretch the Tools column across
+/// the whole card on a wide window — reintroducing the gulf at the table's
+/// trailing edge — or push the table past the card's inner edge on a narrow
+/// one, where the scrollable would clip it. The cap is the wrap boundary
+/// that keeps an unbounded tool list inside the card: the cell is a
+/// `Shrink` container with `max_width(cap)`
+/// (`iced_widget-0.14.2/src/container.rs:133`), so it measures
+/// `min(natural_width, cap)` and long lists wrap at the cap instead.
+///
+/// **Derivation.** The narrowest realistic card is the framework's modal
+/// width floor [`EDITOR_WIDTH_MIN`] — the same floor
+/// [`TOOLS_RESIZE_FLOORS`] defends — and its inner width is that floor less
+/// the frame's padding on both sides, written as the repeated
+/// [`MODAL_PADDING`] term the token gate requires rather than a `2.0 *`
+/// coefficient. The cap is that inner width **less one narrowest-column
+/// floor**: [`CENTER_PANE_MIN_W`], the `240px` central-workspace floor
+/// (`UIF-WIN-001`) and therefore the narrowest column of content the app
+/// renders anywhere else. Reserving it is what makes the cap a budget
+/// rather than a guess: the five content-hugging columns always keep at
+/// least the room the app guarantees its narrowest pane, so the six columns
+/// fit the narrowest card (`248 + 240 = 488`, its exact inner width) with
+/// nothing clipped, while on a wide card the same boundary keeps the table
+/// compact instead of letting a long tool list stretch it across the card.
+pub const TOOLS_CELL_MAX_WIDTH: f32 =
+    EDITOR_WIDTH_MIN - MODAL_PADDING - MODAL_PADDING - CENTER_PANE_MIN_W;
 
 /// `NFR-004` error code for a failed MCP authentication surfaced in the
 /// card's error banner (`UIF-MOD-003`).
@@ -928,10 +997,17 @@ pub fn tools_dialog_card(
         .map(|error| error_banner(&error, view_model.retry_message()))
         .unwrap_or_else(|| Space::new().height(Length::Shrink).into());
 
-    let list = scrollable(tools_table(view_model.rows()))
-        .id(TOOLS_LIST_ID)
-        .height(Length::Fill)
-        .width(Length::Fill);
+    // The table rides inside a `Shrink` box carrying [`TOOLS_TABLE_ID`], so
+    // a layout test can measure the table's own width (AGENTS §5, the same
+    // reason as [`TOOLS_CARD_ID`]); the box adds no padding and no slack.
+    let list = scrollable(
+        container(tools_table(view_model.rows()))
+            .id(TOOLS_TABLE_ID)
+            .width(Length::Shrink),
+    )
+    .id(TOOLS_LIST_ID)
+    .height(Length::Fill)
+    .width(Length::Fill);
 
     // The body spans the card's inner width rather than shrinking to its
     // widest band, so the list and the footer ride the card's own edges
@@ -1095,11 +1171,21 @@ fn error_banner(error: &ModalError, retry: Option<Message>) -> Element<'static, 
 /// mapping and the verified iced citations. With zero rows the header still
 /// renders, so the empty state needs no separate widget.
 ///
-/// Every cell is fixed to [`list_tile::SINGLE_LINE_HEIGHT`] so the rendered
-/// rows are the same height the card's own height budget
-/// ([`tools_content_height`]) charged for them, and the Actions cell's 32px
-/// buttons sit on the same `size::CONTROL_MD` grid as every other
-/// selectable row in the app.
+/// The table's own width is `Length::Shrink`, which is what makes every
+/// column hug its content: iced resolves the fluid (`Fill`) cells against
+/// `self.width.fluid()` (`table.rs:399-407`, `:245`), so a `Shrink` table
+/// resolves them to their measured content size instead of their leftover
+/// allotment (`table.rs:318-340`). The tools column stays the one `Fill`
+/// declaration — it is the only unbounded cell, and keeping a non-`Shrink`
+/// column prevents `Table::new`'s all-`Shrink` promotion of column 0
+/// (`table.rs:129-133`). The leftover width therefore lands at the table's
+/// trailing edge inside the `Fill` scrollable, not between the columns.
+///
+/// Every cell except the tools cell is fixed to
+/// [`list_tile::SINGLE_LINE_HEIGHT`] so the rendered rows are the same
+/// height the card's own height budget ([`tools_content_height`]) charged
+/// for them, and the Actions cell's 32px buttons sit on the same
+/// `size::CONTROL_MD` grid as every other selectable row in the app.
 ///
 /// Purity: pure over `rows`.
 #[must_use]
@@ -1114,7 +1200,7 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
             header_cell(strings::TOOLS_GROUP_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> { group_cell(&row) },
         )
-        .width(Length::Fill),
+        .width(Length::Shrink),
         table::column(
             header_cell(strings::TOOLS_KIND_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> {
@@ -1128,15 +1214,10 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
         .width(Length::Shrink),
         table::column(
             header_cell(strings::TOOLS_LIST_COLUMN),
-            move |row: ToolGroupRow| -> Element<'static, Message> {
-                cell(rung(
-                    row.tools_label.clone(),
-                    typography::BODY,
-                    Palette::fastmd_dark().text,
-                ))
-            },
+            move |row: ToolGroupRow| -> Element<'static, Message> { tools_cell(&row) },
         )
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
         table::column(
             header_cell(strings::TOOLS_CHAR_COUNT_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> { char_count_cell(&row) },
@@ -1146,7 +1227,7 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
             header_cell(strings::TOOLS_ACTIONS_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> { actions_cell(&row) },
         )
-        .width(Length::Fill),
+        .width(Length::Shrink),
     ];
 
     table::table(columns, rows.to_vec())
@@ -1154,7 +1235,7 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
         .padding_y(0.0)
         .separator_x(shape::BORDER_HAIRLINE)
         .separator_y(shape::BORDER_HAIRLINE)
-        .width(Length::Fill)
+        .width(Length::Shrink)
         .into()
 }
 
@@ -1164,6 +1245,31 @@ fn cell(content: text::Text<'static>) -> Element<'static, Message> {
         .height(Length::Fixed(list_tile::SINGLE_LINE_HEIGHT))
         .align_y(Alignment::Center)
         .into()
+}
+
+/// The Tools cell: the comma-joined tool list, wrapped at
+/// [`TOOLS_CELL_MAX_WIDTH`].
+///
+/// This is deliberately **not** a [`cell`]: the tool list is the one string
+/// on the card with no natural length. A `Shrink` container with
+/// `max_width` measures `min(natural_width, cap)` and wraps long lists at
+/// the cap (`iced_widget-0.14.2/src/container.rs:133`), so the column hugs
+/// short lists and bounds long ones instead of stretching a gulf or
+/// overflowing the card. Its height is left free so a wrapped list grows
+/// its own row rather than overflowing the fixed band; every other cell's
+/// [`list_tile::SINGLE_LINE_HEIGHT`] keeps ordinary rows — and every
+/// single-line tools cell, via the row's own maximum — on the shared grid,
+/// and the column's `align_y(Center)` keeps the single-line content on the
+/// same baseline as its neighbours.
+fn tools_cell(row: &ToolGroupRow) -> Element<'static, Message> {
+    container(rung(
+        row.tools_label.clone(),
+        typography::BODY,
+        Palette::fastmd_dark().text,
+    ))
+    .width(Length::Shrink)
+    .max_width(TOOLS_CELL_MAX_WIDTH)
+    .into()
 }
 
 /// A column-header cell.

@@ -124,21 +124,18 @@ fn test_log_and_debug_windows_mount_from_their_domain_flags() {
 }
 
 #[test]
-fn test_tools_about_and_attributions_mount_individually() {
+fn test_tools_and_about_mount_individually() {
     let mut state = fresh_state();
     state.overlay.tools.open();
     assert_eq!(state.mounted_layers(), vec![OverlayLayer::Tools]);
 
     let mut state = fresh_state();
     state.overlay.about.open_about();
-    assert_eq!(state.mounted_layers(), vec![OverlayLayer::About]);
-
-    let mut state = fresh_state();
-    state.overlay.about.open_attributions();
     assert_eq!(
         state.mounted_layers(),
-        vec![OverlayLayer::Attributions],
-        "the credits window replaces About rather than stacking beside it"
+        vec![OverlayLayer::About],
+        "the credits list is a region of the About card, so it mounts with it \
+         and never as a layer of its own"
     );
 }
 
@@ -193,7 +190,7 @@ fn test_view_builds_with_every_overlay_mounted() {
     show_logs(&mut state);
     show_debug(&mut state);
     state.overlay.tools.open();
-    state.overlay.about.open_attributions();
+    state.overlay.about.open_about();
     state.overlay.editor = Some(EditorViewModel::open("/notes/a.md", "# Title\n"));
     state.overlay.dialog.open(DialogKind::Rename {
         path: PathBuf::from("/notes/a.md"),

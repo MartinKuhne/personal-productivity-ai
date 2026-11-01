@@ -29,5 +29,5 @@ Explorer generated 2026-09-02. Selected option: **4 — Document + Bolt**.
 - `build.rs` embeds `assets/icon.ico` on `cfg(windows)` via `winresource`
 - `src/app/ui/logo.rs::load_app_icon()` decodes `icon-32.png` via `image` crate for `ViewportBuilder::with_icon`
 - `src/app/ui/logo.rs::paint_logo()` vector-paints the badge for the top toolbar (20×20, no texture dependency)
-- `src/app/ui/strings.rs::APP_TITLE` is now plain `FastMD Viewer` — glyph removed
+- `src/app/ui/strings.rs::APP_TITLE` is plain `FastMD AI` — glyph removed
 - `src/app/ui/panels/top.rs` allocates 20×20 rect and paints logo before heading

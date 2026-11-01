@@ -129,7 +129,24 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// is invisible to it by design (`token_lint.rs` disclaims semantic
 /// correctness). That is why the padding change is policed by the measured
 /// chrome assertions in `center_tests.rs` and not by this number.
-const PIN_APP_TOKEN_BOUND: usize = 96;
+/// 97 as of the Tools dialog's content-hugging-column fix, which adds one
+/// token-bound visual constant: `ui_iced/tools_dialog.rs:TOOLS_CELL_MAX_WIDTH`,
+/// the Tools cell's wrap boundary. It is a pure difference of named tokens —
+/// `EDITOR_WIDTH_MIN` less `MODAL_PADDING` twice less `CENTER_PANE_MIN_W` —
+/// with **no numeric literal anywhere**. Its first draft read
+/// `(EDITOR_WIDTH_MIN - 2.0 * MODAL_PADDING) / 2.0`, and the gate is right
+/// to refuse that: a coefficient is a literal, so the derivation was restated
+/// as a token budget (the narrowest card's inner width less the narrowest
+/// column floor the five hugging columns keep) rather than excused on
+/// `APP_ALLOW_LIST`. Nothing else moved.
+/// Unmoved at 97 when the About card absorbed the credits list: the two
+/// token-bound band constants left `ui_iced/attributions.rs`
+/// (`HEADER_BAND_HEIGHT`, `FOOTER_BAND_HEIGHT`) and re-landed in
+/// `ui_iced/about.rs` as `ABOUT_CREDITS_HEADER_BAND_HEIGHT` and
+/// `ABOUT_CREDITS_FOOTER_BAND_HEIGHT`, because the furniture they measure is
+/// now the About card's. Two out, two in, both literal-free — the census is
+/// unchanged by design, not by omission.
+const PIN_APP_TOKEN_BOUND: usize = 97;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.

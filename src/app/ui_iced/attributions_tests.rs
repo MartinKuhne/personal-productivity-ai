@@ -1,21 +1,35 @@
 //! Sidecar unit tests for `ui_iced/attributions.rs`.
 //!
-//! Pure view-model and widget-construction tests ([RUST-003]). The catalog
-//! is compile-time data, so these tests read it directly and assert the
-//! snapshot preserves it exactly — no renderer, no bus, no filesystem
-//! ([RUST-006]).
+//! This module is the credits **renderer**: the catalog snapshot, the table,
+//! the scroll area and the link cells. The tests here therefore cover the
+//! data, the widget tree the renderer builds, the geometry the renderer is
+//! *given*, and the deferred intent a link emits.
+//!
+//! What used to be here and is now owned elsewhere, because the credits list
+//! is a region of the About card rather than a window of its own:
+//!
+//! | Case | Where it lives now |
+//! |---|---|
+//! | Card size, viewport fill, gutter clamp | [`crate::ui_iced::about_tests`] (`the_card_fills_the_viewport_on_both_axes`) |
+//! | The solved list height, the cap, the `Fill` fallback | [`crate::ui_iced::about_tests`] (`the_credits_region_is_solved_from_the_card_it_sits_in`) |
+//! | The list never crossing the footer band | [`crate::ui_iced::about_tests`] (`the_credits_list_is_inside_the_card_and_gets_its_solved_height`) |
+//! | Short-viewport collapse | [`crate::ui_iced::about_tests`] (`a_short_viewport_collapses_the_credits_region_without_losing_it`) |
 //!
 //! Cases that share a fixture are grouped into one process: the catalog
-//! integrity checks read one snapshot, the sizing cases solve one table of
-//! viewports, and each headless-layout group lays the card out once and then
-//! measures everything that layout can answer. Every check names its case in
-//! the failure message.
+//! integrity checks read one snapshot, and each headless-layout group lays
+//! its widget out once and then measures everything that layout can answer.
+//! Every check names its case in the failure message.
+//!
+//! No test reads the filesystem, the bus or a renderer ([RUST-006]); the
+//! catalog is compile-time data.
 
 use super::*;
 use crate::ui::strings;
-use crate::ui_iced::about::{AboutViewModel, LICENSE_MAX_HEIGHT, LICENSE_SCROLL_ID};
+use crate::ui_iced::about::ABOUT_CREDITS_FOOTER_BAND_HEIGHT;
 use hoarfrost::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT;
-use iced::Element;
+use hoarfrost::token::size;
+use iced::{Element, Point, Size};
+use iced_test::Selector;
 use iced_test::selector::{Candidate, Target};
 
 /// A synthetic two-row catalog — never read from disk ([RUST-006]).
@@ -57,7 +71,7 @@ fn from_catalog_is_the_shared_catalog_verbatim() {
 
     // The catalog's row shape is `name` / `authors` / `github_url` — there
     // is no per-crate license or version field, so these three are what the
-    // window can show.
+    // card can show.
     for entry in vm.entries() {
         assert!(
             !entry.name.is_empty(),
@@ -156,13 +170,13 @@ fn summary_counts_the_entries_or_reports_the_empty_state() {
 
 // --- Widget construction --------------------------------------------------
 
-/// The table and the framed card build for every catalog shape — empty,
-/// synthetic and the shipped catalog — through both view entry points.
+/// The table and the framed scroll area build for every catalog shape —
+/// empty, synthetic and the shipped catalog.
 ///
-/// The empty state renders the same table widget (header only), so the card's
+/// The empty state renders the same table widget (header only), so the
 /// widget tree never changes (AGENTS §6).
 #[test]
-fn the_table_and_the_view_build_for_every_catalog_shape() {
+fn the_table_and_the_scroll_area_build_for_every_catalog_shape() {
     let models = [
         (
             "empty catalog",
@@ -177,92 +191,22 @@ fn the_table_and_the_view_build_for_every_catalog_shape() {
 
     for (label, vm) in &models {
         let table: Element<'static, Message> = attribution_table(vm.entries());
-        let view: Element<'_, Message> = attributions_view(vm, ROOMY_VIEWPORT);
-        // Both entry points construct the same card; neither panics.
-        let via_method: Element<'_, Message> = vm.view(ROOMY_VIEWPORT);
-        let _ = (label, table, view, via_method);
-    }
-}
+        // The height is handed in by the host — the About card solves it.
+        let list = credits_list(table, Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT));
+        let element: Element<'_, Message> = list.into();
 
-// --- Sizing: the framework owns the box (§4.6.2, INT-5a) -----------------
-
-/// The card is 640×480 straight out of `ModalSizing::attributions()`, clamped
-/// to the viewport gutter and never negative. The retired app values were
-/// 620px wide with a content-driven height and a hand-picked 340px list cap;
-/// the spec row is a fixed 640×480 card whose list fills the remainder.
-#[test]
-fn card_size_is_the_frameworks_attributions_size_clamped_to_the_viewport() {
-    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
-    let cases = [
-        ("roomy viewport", ROOMY_VIEWPORT, Size::new(640.0, 480.0)),
-        (
-            "small viewport",
-            Size::new(600.0, 400.0),
-            Size::new(600.0 - gutter, 400.0 - gutter),
-        ),
-        (
-            "a viewport smaller than the card",
-            Size::new(16.0, 16.0),
-            Size::ZERO,
-        ),
-    ];
-
-    for (label, viewport, expected) in &cases {
-        let size = attributions_card_size(*viewport);
+        // The assertion is that the tree exists and is addressable: a shape
+        // that failed to render would panic on build or be unreachable here.
+        let mut ui = laid_out(ROOMY_VIEWPORT, element);
+        let (region, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
         assert_eq!(
-            size, *expected,
-            "{label}: the solved box must be the framework policy clamped to the viewport"
-        );
-        // The height is the frame's, not the content's: two rows or the whole
-        // catalog render the same box, because the list scrolls.
-        assert_eq!(
-            attributions_card_size(*viewport),
-            size,
-            "{label}: the policy is deterministic across repeated solves"
+            region.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
+            "{label}: the scroll area is in the tree and carries the length it was given"
         );
     }
-
-    let roomy = attributions_card_size(ROOMY_VIEWPORT);
-    assert_eq!(
-        roomy.width,
-        hoarfrost::surface::modal::ATTRIBUTIONS_WIDTH,
-        "roomy viewport: the width is the framework's own constant"
-    );
-    assert_eq!(
-        roomy.height,
-        hoarfrost::surface::modal::ATTRIBUTIONS_HEIGHT,
-        "roomy viewport: the height is the framework's own constant"
-    );
-    assert_ne!(
-        roomy.width, 620.0,
-        "roomy viewport: the retired ATTRIBUTIONS_CARD_WIDTH must not come back"
-    );
-
-    let small = attributions_card_size(Size::new(600.0, 400.0));
-    assert!(
-        small.width <= 640.0 && small.height <= 480.0,
-        "small viewport: a small viewport must shrink the card, never grow it"
-    );
 }
 
-#[test]
-fn the_view_builds_at_every_clamped_size() {
-    let vm = AttributionsViewModel::from_catalog();
-    for viewport in [
-        Size::new(1.0, 1.0),
-        Size::new(128.0, 128.0),
-        Size::new(640.0, 480.0),
-        ROOMY_VIEWPORT,
-    ] {
-        let _card: Element<'_, Message> = attributions_view(&vm, viewport);
-    }
-}
-
-// --- Rendered geometry: measured in a headless layout -----------------
-//
-// The card is a fixed 640x480 box and the credits list takes the
-// remainder, so what these measure is that the box really is that size
-// and that the list really does fill and scroll inside it.
+// --- Headless layout helpers ----------------------------------------------
 
 type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
 
@@ -271,10 +215,10 @@ fn laid_out(viewport: Size, element: Element<'_, Message>) -> Sim<'_> {
     iced_test::Simulator::with_size(iced_test::core::Settings::default(), viewport, element)
 }
 
-/// The laid-out bounds of the framed card box carrying `id`.
+/// The laid-out bounds of the container carrying `id`.
 fn framed_card_bounds(ui: &mut Sim<'_>, id: &'static str) -> iced::Rectangle {
     ui.find(iced::widget::Id::from(id))
-        .unwrap_or_else(|err| panic!("card container {id:?} should be reachable: {err:?}"))
+        .unwrap_or_else(|err| panic!("container {id:?} should be reachable: {err:?}"))
         .bounds()
 }
 
@@ -293,195 +237,85 @@ fn scroll_bounds(ui: &mut Sim<'_>, id: &'static str) -> (iced::Rectangle, iced::
     }
 }
 
-/// **Replaces `the_credits_list_fills_the_card_and_scrolls`.**
+/// The `nth` `Candidate::Text` whose content equals `label`.
 ///
-/// The retired test pinned the list at `330.0` — the uncapped `Length::Fill`
-/// remainder. `UIF-MOD-004` requires the sub-region to be *solved and
-/// capped*, at `ATTRIBUTIONS_LIST_MAX_HEIGHT = 200`, so that pin recorded
-/// a height 130px above the number the §2.2 closed table names. The test
-/// is rewritten around the cap rather than its number quietly edited: what
-/// is asserted now is that the box is 640×480, that the cap binds, that it
-/// arrived from the solver rather than being restated by the view, that the
-/// list still scrolls, and what the cap costs.
-///
-/// **The cost of the cap, measured and recorded rather than buried.** The spec
-/// pins the card at 480px *and* caps the list at 200px. Those two numbers are
-/// in tension for this card: the furniture is 150px, so the card has 330px to
-/// give and the cap only lets 200 of it be used. The remaining **130px is dead
-/// card** — nothing is laid out there — and the list loses roughly **4.4
-/// visible rows**. That trade-off is asserted here as a pinned, visible fact
-/// rather than something a reader has to recompute to notice; if the spec
-/// author resolves it (by shrinking the card, raising the cap, or letting the
-/// card content-fit), this is the test that changes.
+/// `Simulator::find` stops at the first match, so proving a label appears
+/// **exactly once** needs a selector that counts the ones it skipped.
+fn nth_text(label: &str, nth: usize) -> impl Selector<Output = Target> {
+    let mut skipped = 0usize;
+    move |candidate: Candidate<'_>| {
+        let is_match = matches!(candidate, Candidate::Text { content, .. } if content == label);
+        if is_match {
+            if skipped == nth {
+                return Some(Target::from(candidate));
+            }
+            skipped += 1;
+        }
+        None
+    }
+}
+
+/// Points the cursor at `position` and left-clicks it.
+fn click_at(ui: &mut Sim<'_>, position: Point) {
+    ui.point_at(position);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position,
+    })]);
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+}
+
+/// The credits list laid out on its own at a fixed length, so the renderer
+/// can be measured without the card that normally hosts it.
+fn list_at_length(entries: &[Attribution], length: Length) -> Element<'_, Message> {
+    credits_list(attribution_table(entries), length).into()
+}
+
+// --- The scroll area ------------------------------------------------------
+
+/// [`credits_list`] is a wrapper, not a layout decision: it stamps the stable
+/// id ([`ATTRIBUTIONS_LIST_ID`]) and hands iced the [`Length`] the host solved.
+/// It never invents a height of its own, and it keeps the widget in the tree
+/// even when the host solved zero room — the case the `Fill` fallback in
+/// [`crate::ui_iced::about::credits_list_length`] exists for.
 #[test]
-fn the_card_and_credits_list_measure_the_solved_geometry() {
+fn the_scroll_area_honours_the_length_the_host_solved() {
     let vm = AttributionsViewModel::from_catalog();
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
+
+    // The capped path: the host handed in the §2.2 cap.
+    let mut ui = laid_out(
+        ROOMY_VIEWPORT,
+        list_at_length(vm.entries(), Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT)),
+    );
     let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
     drop(ui);
-
-    assert_eq!(
-        bounds.width, 640.0,
-        "rendered box: must be the §4.6.2 width, not the retired 620"
-    );
-    assert_eq!(
-        bounds.height, 480.0,
-        "rendered box: must be the §4.6.2 height"
-    );
-
     assert_eq!(
         region.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "credits list: the card leaves 330px of remainder; §2.2 caps the list at 200, so \
-         the rendered region must be the cap"
-    );
-    assert_eq!(
-        region.height,
-        credits_list_height(attributions_card_size(ROOMY_VIEWPORT).height),
-        "credits list: the rendered height is the solver's answer, not a number the view \
-         restates"
+        "Fixed(200): the rendered region is exactly the length handed in, not a \
+         height the wrapper chose"
     );
     assert!(
         content.height > region.height,
-        "credits list: the {}-row catalog overflows the capped region, so the list still \
-         scrolls: content {:.1}px vs region {:.1}px",
+        "the {}-row catalog overflows a 200px region, so the list scrolls: \
+         content {:.1}px vs region {:.1}px",
         vm.count(),
         content.height,
         region.height,
     );
 
-    let rows = vm.count() as f32;
-    assert_eq!(rows, 61.0, "fixture: the shipped catalog is 61 crates");
-    let row_h = content.height / rows;
-    let uncapped = 330.0;
-
-    // The dead space the cap creates inside the fixed 480px card.
-    let dead = uncapped - region.height;
-    assert_eq!(
-        dead, 130.0,
-        "dead card: 330px remainder - 200px cap = 130px unused"
-    );
-
-    // What that costs in visible rows.
-    let rows_before = uncapped / row_h;
-    let rows_after = region.height / row_h;
-    let lost = rows_before - rows_after;
+    // The zero-room path: `Fill` keeps the widget addressable instead of a
+    // void `Fixed(0.0)`, which iced would drop from the tree entirely.
+    let mut ui = laid_out(ROOMY_VIEWPORT, list_at_length(vm.entries(), Length::Fill));
+    let (region, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
     assert!(
-        lost > 4.0 && lost < 5.0,
-        "visible rows: the cap costs {lost:.2} visible rows ({rows_before:.2} -> {rows_after:.2} \
-         at {row_h:.2}px/row) — a real regression in what a reader can see \
-         without scrolling, recorded deliberately"
+        region.height > 0.0,
+        "Fill: the scrollable is present and takes the viewport it was given"
     );
-}
-
-/// **Overflow safety, re-measured after replacing `Fill` with a solved
-/// fixed height.**
-///
-/// `Fill` made overflow structurally impossible. A solved `Length::Fixed`
-/// is safe only because the band terms it was computed from are the same
-/// terms this `Column` actually consumes — so `solved + bands` equals the
-/// card's inner height and the list lands exactly where `Fill` would have
-/// put it, never further. An *understated* band would over-solve and push
-/// the list through the footer, which is the exact hazard `UIF-MOD-004`
-/// names. This test is what makes that hazard observable rather than
-/// theoretical.
-#[test]
-fn the_credits_list_never_crosses_the_footer_band_at_any_viewport() {
-    let frame = modal_frame();
-    // The footer's own painted extent: the divider above it plus the
-    // control row. The gaps above that are not painted, so the hard limit
-    // is this, not the full footer band.
-    let footer_paint = shape::BORDER_HAIRLINE + size::CONTROL_MD;
-
-    // Every viewport tall enough to hold the card's own 150px of furniture
-    // plus its 32px of padding.
-    for (w, h) in [
-        (1280.0f32, 800.0f32),
-        (900.0, 600.0),
-        (700.0, 520.0),
-        (500.0, 300.0),
-        (420.0, 214.0),
-    ] {
-        let viewport = Size::new(w, h);
-        let vm = AttributionsViewModel::from_catalog();
-        let card = attributions_view(&vm, viewport);
-        let mut ui = laid_out(viewport, card);
-        let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-        drop(ui);
-
-        let inner_bottom = card_b.y + card_b.height - frame.content_padding;
-        let footer_top = inner_bottom - footer_paint;
-        let list_bottom = list.y + list.height;
-
-        assert!(
-            list_bottom <= footer_top + 0.01,
-            "{w}x{h}: the list bottom {list_bottom:.1} reached into the footer \
-             band (footer top {footer_top:.1}) — the band terms are understated"
-        );
-        assert!(
-            list_bottom <= card_b.y + card_b.height + 0.01,
-            "{w}x{h}: the list escaped the card entirely \
-             (list bottom {list_bottom:.1}, card bottom {:.1})",
-            card_b.y + card_b.height
-        );
-        assert!(
-            list.y >= card_b.y + frame.content_padding - 0.01,
-            "{w}x{h}: the list started above the card's inner top"
-        );
-    }
-}
-
-/// The two short-viewport branches of the solver: a viewport too short for the
-/// card's own furniture clamps the list to zero rather than producing a
-/// negative height or panicking, and a short-but-viable card gives the list its
-/// remainder instead of the cap.
-///
-/// The card's furniture is `150px` and its padding `32px`, so below a
-/// `214px` viewport the card cannot hold itself. That condition is
-/// pre-existing and independent of the sub-region solver — `Fill` hit it
-/// too — but the solver is now the thing that decides what the list gets
-/// there, so its clamp needs its own pin.
-#[test]
-fn the_solver_clamps_the_list_on_short_viewports() {
-    // 360x180: below the card's own furniture.
-    {
-        let viewport = Size::new(360.0, 180.0);
-        let vm = AttributionsViewModel::from_catalog();
-        let card = attributions_view(&vm, viewport);
-        let mut ui = laid_out(viewport, card);
-        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-        drop(ui);
-
-        assert_eq!(
-            list.height, 0.0,
-            "360x180: 148px of card cannot hold 150px of furniture; the solver clamps to \
-             zero rather than handing iced a negative extent"
-        );
-    }
-
-    // 300px viewport -> 268px card -> 118px remainder, under the 200 cap.
-    {
-        let viewport = Size::new(900.0, 300.0);
-        let vm = AttributionsViewModel::from_catalog();
-        let card = attributions_view(&vm, viewport);
-        let mut ui = laid_out(viewport, card);
-        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-        drop(ui);
-
-        let card_h = attributions_card_size(viewport).height;
-        let expected = card_h
-            - (HEADER_BAND_HEIGHT + 2.0 * modal_frame().content_padding + FOOTER_BAND_HEIGHT);
-        assert!(
-            expected < ATTRIBUTIONS_LIST_MAX_HEIGHT,
-            "900x300: fixture: this card is below the cap"
-        );
-        assert_eq!(
-            list.height, expected,
-            "900x300: below the cap the list gets everything the card has left"
-        );
-    }
 }
 
 /// A very large catalog does not change the region, only the scroll extent.
@@ -495,15 +329,16 @@ fn a_very_large_catalog_changes_the_scroll_extent_not_the_region() {
         })
         .collect();
 
-    let vm = AttributionsViewModel::with_entries(big);
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let mut ui = laid_out(
+        ROOMY_VIEWPORT,
+        list_at_length(&big, Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT)),
+    );
     let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
     drop(ui);
 
     assert_eq!(
         list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "5,000 rows must not grow the region past the cap"
+        "5,000 rows must not grow the region past the length it was given"
     );
     assert!(
         content.height > 100_000.0,
@@ -512,86 +347,95 @@ fn a_very_large_catalog_changes_the_scroll_extent_not_the_region() {
     );
 }
 
-/// The About sibling is untouched by this change: it keeps its own cap and
-/// never routes through the attributions solver.
+// --- The table ------------------------------------------------------------
+
+/// The table renders one row per crate: every fixture crate name and author
+/// appears as its own text run, and nothing else does.
 #[test]
-fn the_about_card_is_unaffected_and_keeps_its_own_cap() {
-    assert_eq!(
-        LICENSE_MAX_HEIGHT, ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "both are 200 by coincidence of the spec, not by shared plumbing; if \
-         one moves and the other does not, that is the point"
-    );
-    let vm = AboutViewModel::from_build();
-    let card = crate::ui_iced::about::about_card(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let (region, _) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
+fn the_table_renders_one_row_per_crate() {
+    let entries = fixture_entries();
+    let table = attribution_table(&entries);
+    let mut ui = laid_out(ROOMY_VIEWPORT, table);
+
+    for entry in &entries {
+        assert!(
+            ui.find(nth_text(entry.name, 0)).is_ok(),
+            "row for {}: the crate name must be rendered",
+            entry.name
+        );
+        assert!(
+            ui.find(nth_text(entry.authors, 0)).is_ok(),
+            "row for {}: the authors cell must be rendered",
+            entry.name
+        );
+        // The repository cell is `rich_text`, which iced's widget visitor does
+        // not report as a `Candidate::Text` — it is reached as a hit target
+        // instead (`the_repository_link_hit_box_is_a_real_target` and
+        // `pressing_the_repository_link_raises_the_deferred_intent`).
+        // Exactly once: a row that rendered twice would double-count the list.
+        assert!(
+            ui.find(nth_text(entry.name, 1)).is_err(),
+            "row for {}: the crate name must appear once, not twice",
+            entry.name
+        );
+    }
+
+    for caption in [
+        strings::ABOUT_COL_CRATE,
+        strings::ABOUT_COL_AUTHORS,
+        strings::ABOUT_COL_REPO,
+    ] {
+        assert!(
+            ui.find(nth_text(caption, 0)).is_ok(),
+            "header: the column caption {caption:?} must be rendered"
+        );
+    }
     drop(ui);
-    assert!(
-        region.height <= LICENSE_MAX_HEIGHT + 0.01,
-        "the About license list keeps its own cap: {:.1} vs {LICENSE_MAX_HEIGHT}",
-        region.height
-    );
 }
 
-/// Empty catalog: the list is still allocated, still capped, the card does not
-/// collapse, and the empty table does not overflow its region.
+/// The empty catalog renders the header row and no data rows, so the shape of
+/// the tree does not change with the catalog (AGENTS §6).
 #[test]
-fn an_empty_catalog_keeps_the_card_and_the_capped_list() {
-    // The empty state changes the summary line, not the box.
-    let vm = AttributionsViewModel::with_entries(vec![]);
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    drop(ui);
+fn an_empty_catalog_renders_the_header_only_table() {
+    let mut ui = laid_out(
+        ROOMY_VIEWPORT,
+        list_at_length(&[], Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT)),
+    );
+    let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
 
-    assert_eq!(
-        list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "empty catalog: the list is still allocated and still capped"
-    );
-    assert_eq!(
-        card_b.width, 640.0,
-        "empty catalog: the empty state must not resize the card"
-    );
-    assert_eq!(
-        card_b.height, 480.0,
-        "empty catalog: the empty state must not resize the card"
-    );
+    for caption in [
+        strings::ABOUT_COL_CRATE,
+        strings::ABOUT_COL_AUTHORS,
+        strings::ABOUT_COL_REPO,
+    ] {
+        assert!(
+            ui.find(nth_text(caption, 0)).is_ok(),
+            "empty catalog: the caption {caption:?} still renders — the empty \
+             state is an empty table, not a different widget"
+        );
+    }
     assert!(
-        content.height <= list.height,
-        "empty catalog: an empty table must not overflow the region: content {:.1} vs \
-         region {:.1}",
+        content.height <= region.height,
+        "empty catalog: an empty table must not overflow its region: content \
+         {:.1} vs region {:.1}",
         content.height,
-        list.height
+        region.height,
     );
-}
-
-#[test]
-fn a_short_viewport_shrinks_the_card_instead_of_overflowing() {
-    // The gutter clamp reaches the rendered box on both axes, so a window
-    // smaller than the card never gets a card that hangs off it.
-    let vm = AttributionsViewModel::from_catalog();
-    let viewport = Size::new(500.0, 300.0);
-    let card = attributions_view(&vm, viewport);
-    let mut ui = laid_out(viewport, card);
-    let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
-    assert_eq!(bounds.width, 500.0 - gutter);
-    assert_eq!(bounds.height, 300.0 - gutter);
-    assert!(bounds.width <= viewport.width && bounds.height <= viewport.height);
     drop(ui);
 }
 
+/// The row grid the table lays out is the declared one: a `UI_COMPACT` line
+/// measures its own leading, not `size × factor`. Same regression guard as the
+/// About card, measured on this module's own `rung` helper.
 #[test]
 fn a_body_rung_lays_out_on_its_declared_line_grid() {
-    // Same regression guard as the About card: `From<f32> for
-    // iced::LineHeight` is `Relative`, so a bare `line_height` f32 means
-    // a MULTIPLE of the font size. A UI_COMPACT line must measure its
-    // declared 18px, not 13 x 18 = 234px.
-    let probe = iced::widget::container(rung(
+    // `From<f32> for iced::LineHeight` is `Relative`, so a bare `line_height`
+    // f32 means a MULTIPLE of the font size. A UI_COMPACT line must measure
+    // its declared 18px, not 13 x 18 = 234px.
+    let probe = container(rung(
         "0123456789",
         typography::UI_COMPACT,
-        iced::Color::WHITE,
+        crate_name_color(),
     ))
     .id("attributions_probe_line")
     .width(Length::Shrink)
@@ -607,24 +451,21 @@ fn a_body_rung_lays_out_on_its_declared_line_grid() {
     drop(ui);
 }
 
+/// The footer band the host reserves is at least the footer's own painted
+/// extent, so the arithmetic in
+/// [`crate::ui_iced::about::credits_list_height`] cannot understate the space
+/// below the list by claiming less than the footer actually paints.
 #[test]
-fn the_repository_link_hit_box_is_a_real_target() {
-    // `hyperlink::MIN_HEIGHT` is `size.hit_target.min` (24px). The cell
-    // must actually be that tall, not a text-height sliver.
-    let cell = repository_cell("https://github.com/dtolnay/anyhow");
-    let mut ui = laid_out(ROOMY_VIEWPORT, cell);
-    let bounds = ui
-        .find(|c: Candidate<'_>| match c {
-            Candidate::Container { bounds, .. } => Some(bounds),
-            _ => None,
-        })
-        .expect("the link cell container should lay out");
-    assert_eq!(
-        bounds.height,
-        hoarfrost::widget::hyperlink::MIN_HEIGHT,
-        "the link must carry the framework's minimum hit target"
+fn the_footer_band_covers_what_the_footer_paints() {
+    let painted = shape::BORDER_HAIRLINE + size::CONTROL_MD;
+    assert!(
+        ABOUT_CREDITS_FOOTER_BAND_HEIGHT >= painted,
+        "the band must cover the divider ({:.1}) plus the footer row ({:.1}); \
+         the band is {:.1}",
+        shape::BORDER_HAIRLINE,
+        size::CONTROL_MD,
+        ABOUT_CREDITS_FOOTER_BAND_HEIGHT,
     );
-    drop(ui);
 }
 
 // --- The repository link (UIF-ATOM-001d) ---------------------------------
@@ -735,7 +576,54 @@ fn repository_cells_build_for_every_catalog_entry() {
     }
 }
 
-// --- Deferred intents -----------------------------------------------------
+#[test]
+fn the_repository_link_hit_box_is_a_real_target() {
+    // `hyperlink::MIN_HEIGHT` is `size.hit_target.min` (24px). The cell
+    // must actually be that tall, not a text-height sliver.
+    let cell = repository_cell("https://github.com/dtolnay/anyhow");
+    let mut ui = laid_out(ROOMY_VIEWPORT, cell);
+    let bounds = ui
+        .find(|c: Candidate<'_>| match c {
+            Candidate::Container { bounds, .. } => Some(bounds),
+            _ => None,
+        })
+        .expect("the link cell container should lay out");
+    assert_eq!(
+        bounds.height,
+        hoarfrost::widget::hyperlink::MIN_HEIGHT,
+        "the link must carry the framework's minimum hit target"
+    );
+    drop(ui);
+}
+
+/// The link is not only tall, it is **pressable**: a click inside the hit box
+/// raises the deferred intent, and it raises exactly one message.
+///
+/// This is the tier-3 half of the claim the colour and geometry tests make —
+/// they prove the cell looks like a link and is as big as a link; only a
+/// simulated press proves the `mouse_area` is wired to anything.
+#[test]
+fn pressing_the_repository_link_raises_the_deferred_intent() {
+    let url = "https://github.com/dtolnay/anyhow";
+    let mut ui = laid_out(ROOMY_VIEWPORT, repository_cell(url));
+    let bounds = ui
+        .find(|c: Candidate<'_>| match c {
+            Candidate::Container { bounds, .. } => Some(bounds),
+            _ => None,
+        })
+        .expect("the link cell container should lay out");
+    click_at(&mut ui, bounds.center());
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert_eq!(
+        messages,
+        vec![Message::About(AboutMessage::RepositoryOpened {
+            url: url.to_owned(),
+        })],
+        "one press of one link must raise exactly one deferred intent, and the \
+         reducer — not the view — is the thing that opens the url"
+    );
+}
 
 /// The press carries an owned copy of the URL, so the view never borrows the
 /// row it came from.

@@ -11,6 +11,11 @@
 //! 1200x800, 1600x1000 and a stubby window, plus the inner list and
 //! title band spanning the card — and the `modal_error` cases pin
 //! `UIF-MOD-003`'s auth-failure banner and its `Recovery`.
+//!
+//! The column-width cases at the end pin the content-hugging rule: every
+//! table column measures no wider than its content, the table as a whole
+//! stays narrower than the list it sits in, and the one unbounded cell
+//! (the Tools list) wraps at `TOOLS_CELL_MAX_WIDTH` inside the card.
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
@@ -2347,4 +2352,213 @@ fn action_variant(action: &ToolAction) -> ButtonVariant {
     } else {
         ButtonVariant::Secondary
     }
+}
+
+// --- Column widths: the table hugs its content -----------------------------
+//
+// The owner's defect: "adjust the columns in the tools dialog so columns
+// don't take more space than the content does." The card keeps its 80%
+// viewport fill, but the table inside it must hug its content — the
+// leftover width belongs at the table's trailing edge, not spread between
+// the columns as gulfs of whitespace. Every case below lays the real mount
+// out headless and measures the rendered text, so the rule is pinned by
+// geometry, not by reading a `Length` back out of a column declaration.
+
+/// The horizontal room the table spends between two adjacent columns: the
+/// cell padding on both sides plus the vertical separator
+/// (`table.rs:258` — `padding_x * 2 + separator_x`).
+fn table_spacing_x() -> f32 {
+    2.0 * space::XS + shape::BORDER_HAIRLINE
+}
+
+/// Lays the real modal mount out headless at `viewport` and hands back the
+/// live simulator, so several text measurements share one layout pass.
+fn mounted_simulator(
+    view_model: &ToolsDialogViewModel,
+    viewport: Size,
+) -> iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer> {
+    iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        viewport,
+        tools_modal(view_model, viewport, None, false),
+    )
+}
+
+/// Bounds of the first rendered text widget whose content is exactly `label`.
+fn text_label_bounds(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    label: &str,
+) -> Rectangle {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Text {
+            content, bounds, ..
+        } if *content == *label => Some(bounds),
+        _ => None,
+    })
+    .unwrap_or_else(|err| panic!("the Tools card must render the {label:?} label: {err:?}"))
+}
+
+/// The Group column used to be declared `Fill`, and a `Fill` column always
+/// consumes the whole leftover width (`table.rs:318-340`), so it rendered
+/// as a gulf. It must now measure no wider than its widest text.
+#[test]
+fn the_group_column_hugs_its_text_instead_of_absorbing_the_card_slack() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(1);
+    let mut ui = mounted_simulator(&view_model, viewport);
+
+    let group = text_label_bounds(&mut ui, "Filesystem");
+    let group_header = text_label_bounds(&mut ui, strings::TOOLS_GROUP_COLUMN);
+    let kind = text_label_bounds(&mut ui, strings::TOOLS_KIND_INTERNAL);
+
+    // Both Group texts start at the column's left edge, so the distance to
+    // the Kind column's left edge, minus the inter-column spacing the table
+    // owns, is the Group column's measured width.
+    let column_width = kind.x - group.x - table_spacing_x();
+    let content = group.width.max(group_header.width);
+    assert!(
+        column_width <= content + 1.0,
+        "the Group column measures {column_width:.1}px but its widest text is {content:.1}px \
+         wide — the column is absorbing the card's slack instead of hugging its content"
+    );
+}
+
+/// The Kind column must measure its content, not the card's slack: its
+/// width is its widest text (cell or header) and nothing more.
+#[test]
+fn the_kind_column_measures_its_content_not_the_card_slack() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(1);
+    let mut ui = mounted_simulator(&view_model, viewport);
+
+    let kind = text_label_bounds(&mut ui, strings::TOOLS_KIND_INTERNAL);
+    let kind_header = text_label_bounds(&mut ui, strings::TOOLS_KIND_COLUMN);
+    let tools = text_label_bounds(&mut ui, "read_note, write_note");
+
+    let column_width = tools.x - kind.x - table_spacing_x();
+    let content = kind.width.max(kind_header.width);
+    assert!(
+        column_width <= content + 1.0,
+        "the Kind column measures {column_width:.1}px but its widest text is {content:.1}px \
+         wide — a short-content column must not absorb the card's slack"
+    );
+}
+
+/// The Prompt column likewise: the char count (plus its chip, absent on this
+/// internal row) is all the width it may take.
+#[test]
+fn the_prompt_column_measures_its_content_not_the_card_slack() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(1);
+    let mut ui = mounted_simulator(&view_model, viewport);
+
+    // rows_n(1)'s single group is "read_note"(9) + "write_note"(10).
+    let prompt = text_label_bounds(&mut ui, "19");
+    let prompt_header = text_label_bounds(&mut ui, strings::TOOLS_CHAR_COUNT_COLUMN);
+    let actions = text_label_bounds(&mut ui, strings::TOOLS_ACTIONS_COLUMN);
+
+    let column_width = actions.x - prompt.x - table_spacing_x();
+    let content = prompt.width.max(prompt_header.width);
+    assert!(
+        column_width <= content + 1.0,
+        "the Prompt column measures {column_width:.1}px but its widest text is {content:.1}px \
+         wide — a short-content column must not absorb the card's slack"
+    );
+}
+
+/// The direct anti-gulf pin: with narrow content the whole table must
+/// measure strictly less than the list it sits in. The list keeps its
+/// `Fill` width; the slack lands after the table's last column, not inside
+/// the columns.
+#[test]
+fn the_table_hugs_its_rows_instead_of_spanning_the_card() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(9);
+    let list = mounted_list_bounds(&view_model, viewport);
+    let table = mounted_bounds(TOOLS_TABLE_ID, &view_model, viewport);
+
+    assert!(
+        table.width < list.width - 1.0,
+        "the table measures {:.1}px inside a {:.1}px list — the leftover width must land at \
+         the table's trailing edge, not spread between the columns",
+        table.width,
+        list.width
+    );
+    assert!(
+        (table.x - list.x).abs() <= 1.0,
+        "the content-width table must stay left-aligned inside the list (table x={:.1}, \
+         list x={:.1})",
+        table.x,
+        list.x
+    );
+}
+
+/// The Tools cell is the one column with no natural content ceiling. A long
+/// tool list must wrap at [`TOOLS_CELL_MAX_WIDTH`] — not stretch a gulf, and
+/// not push the table past the card's inner edge where the scrollable would
+/// clip it.
+#[test]
+fn a_long_tools_list_wraps_at_the_cap_and_stays_inside_the_card() {
+    let mut row = row_from_group(
+        &internal_group(InternalToolGroup::Filesystem),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    row.tools_label = (0..20)
+        .map(|index| format!("fetch_remote_resource_{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let view_model = ToolsDialogViewModel::with_rows(vec![row.clone()]);
+
+    let card = mounted_card_bounds(&view_model, ROOMY);
+    let mut ui = mounted_simulator(&view_model, ROOMY);
+
+    let tools = text_label_bounds(&mut ui, &row.tools_label);
+    assert!(
+        tools.width <= TOOLS_CELL_MAX_WIDTH + 1.0,
+        "the Tools cell must wrap at the cap (measured {:.1}px, cap {:.1}px)",
+        tools.width,
+        TOOLS_CELL_MAX_WIDTH
+    );
+    assert!(
+        tools.width > TOOLS_CELL_MAX_WIDTH / 2.0,
+        "the wrapped list should fill most of the cap rather than collapse (measured {:.1}px)",
+        tools.width
+    );
+
+    let table = mounted_bounds(TOOLS_TABLE_ID, &view_model, ROOMY);
+    let inner_right = card.x + card.width - modal_frame().content_padding;
+    assert!(
+        table.x + table.width <= inner_right + 1.0,
+        "the table's right edge ({:.1}px) must stay inside the card's inner right edge \
+         ({:.1}px) — nothing may be clipped by the scrollable",
+        table.x + table.width,
+        inner_right
+    );
+}
+
+/// The cap is derived from framework tokens, not a bare magic number: the
+/// narrowest realistic card's inner width — the modal width floor
+/// [`EDITOR_WIDTH_MIN`] less the frame's padding on both sides — minus the
+/// framework's narrowest content-column floor [`CENTER_PANE_MIN_W`], which
+/// is the room the five hugging columns always keep.
+#[test]
+fn the_tools_cell_cap_is_the_narrowest_cards_inner_width_less_a_column_floor() {
+    assert_eq!(
+        TOOLS_CELL_MAX_WIDTH,
+        EDITOR_WIDTH_MIN
+            - crate::ui_iced::overlay::MODAL_PADDING
+            - crate::ui_iced::overlay::MODAL_PADDING
+            - hoarfrost::geometry::CENTER_PANE_MIN_W
+    );
+    assert!(
+        TOOLS_CELL_MAX_WIDTH + hoarfrost::geometry::CENTER_PANE_MIN_W
+            <= inner_width(EDITOR_WIDTH_MIN),
+        "the cap and the column floor it reserves must together fit the \
+         narrowest card's inner width"
+    );
+    assert!(
+        TOOLS_CELL_MAX_WIDTH < inner_width(EDITOR_WIDTH_MIN),
+        "the cap must leave room for the five hugging columns inside the narrowest card"
+    );
 }

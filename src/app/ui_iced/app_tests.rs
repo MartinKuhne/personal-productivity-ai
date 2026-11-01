@@ -424,13 +424,6 @@ fn test_close_topmost_closes_each_layer_in_turn() {
     let cases: Vec<ClosableLayer> = vec![
         (CLOSED_LAYER_BATCH, open_batch, |o| o.batch.is_open()),
         (
-            CLOSED_LAYER_ATTRIBUTIONS,
-            |o| {
-                o.about.open_attributions();
-            },
-            |o| o.about.is_attributions(),
-        ),
-        (
             CLOSED_LAYER_ABOUT,
             |o| {
                 o.about.open_about();
@@ -532,7 +525,7 @@ fn test_close_topmost_closes_only_the_topmost_layer() {
 fn test_close_topmost_walks_the_escape_rank_order() {
     let mut overlay = OverlayState::default();
     open_batch(&mut overlay);
-    overlay.about.open_attributions();
+    overlay.about.open_about();
     overlay.tools.open();
     overlay.debug.open();
     open_dialog(&mut overlay);
@@ -546,7 +539,7 @@ fn test_close_topmost_walks_the_escape_rank_order() {
         CLOSED_LAYER_CONTEXT_MENU,
         // Modal band — escape rank 2, top of band first.
         CLOSED_LAYER_BATCH,
-        CLOSED_LAYER_ATTRIBUTIONS,
+        CLOSED_LAYER_ABOUT,
         CLOSED_LAYER_TOOLS,
         CLOSED_LAYER_DIALOG,
         CLOSED_LAYER_EDITOR,
@@ -667,7 +660,7 @@ fn test_close_topmost_still_closes_batch_first_over_every_non_menu_surface() {
     open_editor(&mut overlay);
     open_dialog(&mut overlay);
     overlay.tools.open();
-    overlay.about.open_attributions();
+    overlay.about.open_about();
     open_batch(&mut overlay);
 
     assert_eq!(
@@ -676,7 +669,7 @@ fn test_close_topmost_still_closes_batch_first_over_every_non_menu_surface() {
         "the batch dialog must still be the first thing Esc closes"
     );
     assert!(!overlay.batch.is_open());
-    assert!(overlay.about.is_attributions());
+    assert!(overlay.about.is_about());
     assert!(overlay.tools.is_open());
     assert!(overlay.dialog.is_open());
     assert!(overlay.editor.is_some());

@@ -674,7 +674,8 @@ pub struct OverlayState {
     pub debug: AgentDebugWindowState,
     /// The tools dialog window.
     pub tools: ToolsDialogState,
-    /// The About / attributions window.
+    /// The About card — identity, licence and the third-party credits list
+    /// rendered inside it.
     pub about: AboutWindowState,
     /// The batch prompt dialog and its composed selection.
     pub batch: BatchDialogState,
@@ -1098,20 +1099,15 @@ impl OverlayState {
             SurfaceKind::Modal,
             self.tools.is_open(),
         );
-        // `AboutWindowState` holds a single `Option`, so the two identity
-        // windows are mutually exclusive and at most one of these two ids
-        // is ever registered.
+        // `AboutWindowState` holds a single `Option`, so at most one About
+        // surface is ever registered. The third-party credits list is not a
+        // surface of its own: the owner's ruling moved it inside the About
+        // card, so it shares this id, this band entry and this dismissal.
         sync_surface(
             &mut self.surfaces,
             SURFACE_ID_ABOUT,
             SurfaceKind::Modal,
             self.about.is_about(),
-        );
-        sync_surface(
-            &mut self.surfaces,
-            SURFACE_ID_ATTRIBUTIONS,
-            SurfaceKind::Modal,
-            self.about.is_attributions(),
         );
         sync_surface(
             &mut self.surfaces,
@@ -1204,8 +1200,12 @@ impl OverlayState {
     ///
     /// The corrected order for the same fully-open stack is:
     ///
-    /// `hamburger` → `ContextMenu` → `Batch` → `Attributions` → `About`
-    /// → `Tools` → `Dialog` → `Editor` → `AgentDebug`
+    /// `hamburger` → `ContextMenu` → `Batch` → `About` → `Tools` → `Dialog`
+    /// → `Editor` → `AgentDebug`
+    ///
+    /// (`Attributions` is gone from both lists: the owner's ruling moved the
+    /// credits list inside the About card, so there is nothing left between
+    /// `Batch` and `About` to unwind.)
     ///
     /// That is what makes `Esc` behave like a native stack: pressing it
     /// over the batch dialog does not also tear down the About window
@@ -1396,7 +1396,6 @@ impl ClosableSurfaces<'_> {
             SURFACE_ID_DIALOG => (CLOSED_LAYER_DIALOG, self.dialog.close()),
             SURFACE_ID_TOOLS => (CLOSED_LAYER_TOOLS, self.tools.close()),
             SURFACE_ID_ABOUT => (CLOSED_LAYER_ABOUT, self.about.close()),
-            SURFACE_ID_ATTRIBUTIONS => (CLOSED_LAYER_ATTRIBUTIONS, self.about.close()),
             SURFACE_ID_BATCH => (CLOSED_LAYER_BATCH, self.batch.close()),
             SURFACE_ID_AGENT_DEBUG => (CLOSED_LAYER_AGENT_DEBUG, self.debug.close()),
             // The Background Operations Log is registered for z-order and
@@ -1497,10 +1496,8 @@ pub enum OverlayLayer {
     AgentDebug,
     /// The tools dialog.
     Tools,
-    /// The About window.
+    /// The About window, third-party credits list included.
     About,
-    /// The third-party attributions window.
-    Attributions,
     /// The batch prompt-processing dialog (topmost).
     Batch,
 }
@@ -1508,10 +1505,6 @@ pub enum OverlayLayer {
 /// Layer name [`OverlayState::close_topmost`] reports for the batch
 /// prompt-processing dialog ([UI-056]).
 pub const CLOSED_LAYER_BATCH: &str = "batch";
-
-/// Layer name [`OverlayState::close_topmost`] reports for the third-party
-/// attributions window ([UI-056]).
-pub const CLOSED_LAYER_ATTRIBUTIONS: &str = "attributions";
 
 /// Layer name [`OverlayState::close_topmost`] reports for the About window
 /// ([UI-056]).
@@ -1570,10 +1563,11 @@ pub const SURFACE_ID_DIALOG: &str = "overlay.dialog";
 pub const SURFACE_ID_TOOLS: &str = "overlay.tools";
 
 /// Registry id for the About window (`Modal`).
+///
+/// The third-party credits list has **no id of its own**: it is a region of
+/// the About card, so it shares this surface, this band slot and this
+/// dismissal.
 pub const SURFACE_ID_ABOUT: &str = "overlay.about";
-
-/// Registry id for the third-party attributions window (`Modal`).
-pub const SURFACE_ID_ATTRIBUTIONS: &str = "overlay.attributions";
 
 /// Registry id for the batch prompt-processing dialog (`Modal`).
 pub const SURFACE_ID_BATCH: &str = "overlay.batch";
@@ -1595,7 +1589,7 @@ pub const SURFACE_ID_LOGS: &str = "overlay.logs";
 ///
 /// The order is the draw order: the context menu sits above the panels, the
 /// editor above that, then the small dialogs, the log viewer, the debug
-/// window, the tools dialog, the identity windows and the batch dialog last.
+/// window, the tools dialog, the identity window and the batch dialog last.
 ///
 /// [RUST-020]: pure.
 #[must_use]
@@ -1621,9 +1615,6 @@ pub fn mounted_layers(overlay: &OverlayState, models: &ViewModels) -> Vec<Overla
     }
     if overlay.about.is_about() {
         layers.push(OverlayLayer::About);
-    }
-    if overlay.about.is_attributions() {
-        layers.push(OverlayLayer::Attributions);
     }
     if overlay.batch.is_open() {
         layers.push(OverlayLayer::Batch);

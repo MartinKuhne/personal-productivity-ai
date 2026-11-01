@@ -5,8 +5,15 @@
 //! synthetic literal that is never opened, and the only real data read is
 //! the compile-time build metadata and the `include_str!`-embedded license
 //! ([RUST-006]).
+//!
+//! The geometry tests split in two. The tier-1 ones read the sizing policy
+//! ([`ABOUT_SIZING`], [`credits_list_height`]); the tier-2 ones lay the card
+//! out in a headless `iced_test::Simulator` and measure the box, because an
+//! 80%-of-the-window card is only worth claiming if the tree actually
+//! produces 80% and the inline credits list actually fits inside it.
 
 use super::*;
+use crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES};
 use crate::ui::strings;
 use iced::Element;
 
@@ -22,7 +29,6 @@ fn known_vm() -> AboutViewModel {
         commit_short_hash: "01234567",
         build_date: "2026-10-18",
         license_text: "MIT License\n\nPermission is hereby granted.\n\nThe rest.".to_string(),
-        attribution_count: 3,
     }
 }
 
@@ -35,6 +41,20 @@ fn unknown_vm() -> AboutViewModel {
         build_date: UNKNOWN_BUILD_METADATA,
         ..known_vm()
     }
+}
+
+/// The credits snapshot the card renders inline, over three synthetic rows.
+///
+/// The rows are never opened: the repository cell only carries a deferred
+/// open-in-browser intent, and the reducer is what would act on it
+/// ([RUST-006]).
+fn credits_vm() -> AttributionsViewModel {
+    let row = |name: &'static str| Attribution {
+        name,
+        authors: "Fixture Author",
+        github_url: "https://example.invalid/fixture",
+    };
+    AttributionsViewModel::with_entries(vec![row("alpha"), row("beta"), row("gamma")])
 }
 
 // --- View-model: identity carried through construction ------------------
@@ -120,10 +140,14 @@ fn from_build_license_is_the_reflowed_mit_body() {
 }
 
 #[test]
-fn from_build_attribution_count_matches_the_reused_catalog() {
-    let vm = AboutViewModel::from_build();
-    assert_eq!(vm.attribution_count, DIRECT_DEPENDENCIES.len());
-    assert!(vm.attribution_count > 0, "the catalog is not empty");
+fn the_credits_snapshot_the_card_uses_is_the_reused_catalog() {
+    // The card's count line and its rows come from one snapshot, so the only
+    // honest pin is the catalog itself: the production snapshot carries every
+    // entry and nothing else.
+    let vm = AttributionsViewModel::from_catalog();
+    assert_eq!(vm.count(), DIRECT_DEPENDENCIES.len());
+    assert!(vm.count() > 0, "the catalog is not empty");
+    assert_eq!(vm.entries(), DIRECT_DEPENDENCIES);
 }
 
 // --- View-model: derived text -------------------------------------------
@@ -148,10 +172,13 @@ fn commit_tooltip_reveals_full_hash_and_hint() {
 }
 
 #[test]
-fn attributions_summary_uses_the_shared_formatter() {
+fn the_credits_count_line_uses_the_shared_formatter() {
+    // The line the card renders above the inline table is the shared
+    // formatter over the same snapshot the rows come from.
+    assert_eq!(credits_vm().summary(), strings::format_attribution_count(3));
     assert_eq!(
-        known_vm().attributions_summary(),
-        strings::format_attribution_count(3)
+        AttributionsViewModel::with_entries(Vec::new()).summary(),
+        strings::ABOUT_ATTRIBUTIONS_EMPTY
     );
 }
 
@@ -185,15 +212,17 @@ fn banner_glyph_is_the_shared_phosphor_bolt() {
 
 // --- Card construction ---------------------------------------------------
 
-/// A viewport wide enough that no gutter clamp bites.
+/// A viewport wide and tall enough that neither the gutter clamp nor the
+/// width floor bites.
 const ROOMY_VIEWPORT: Size = Size::new(1280.0, 800.0);
 
 #[test]
 fn about_card_builds_for_known_and_unknown_metadata() {
     let known = known_vm();
     let unknown = unknown_vm();
-    let known_card: Element<'_, Message> = about_card(&known, ROOMY_VIEWPORT);
-    let unknown_card: Element<'_, Message> = about_card(&unknown, ROOMY_VIEWPORT);
+    let credits = credits_vm();
+    let known_card: Element<'_, Message> = about_card(&known, &credits, ROOMY_VIEWPORT);
+    let unknown_card: Element<'_, Message> = about_card(&unknown, &credits, ROOMY_VIEWPORT);
     // Constructing both states must not panic; the unknown build differs
     // only in text and press handlers, never in widget count.
     let _ = (known_card, unknown_card);
@@ -202,7 +231,18 @@ fn about_card_builds_for_known_and_unknown_metadata() {
 #[test]
 fn about_card_builds_from_the_build_snapshot() {
     let vm = AboutViewModel::from_build();
-    let _card: Element<'_, Message> = vm.view(ROOMY_VIEWPORT);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let _card: Element<'_, Message> = vm.view(&credits, ROOMY_VIEWPORT);
+}
+
+#[test]
+fn about_card_builds_over_an_empty_catalog() {
+    // The empty state changes the count line's text, not the widget count
+    // (AGENTS §6): the section, the table header and the scroll area stay.
+    let vm = known_vm();
+    let empty = AttributionsViewModel::with_entries(Vec::new());
+    let _card: Element<'_, Message> = about_card(&vm, &empty, ROOMY_VIEWPORT);
 }
 
 #[test]
@@ -211,31 +251,61 @@ fn footer_and_close_button_build() {
     let _footer: Element<'static, Message> = about_footer();
 }
 
-// --- Sizing: the framework owns the box (§4.6.2, INT-5a) -----------------
+// --- Sizing: an app-side override of §4.6.2 ------------------------------
 
 #[test]
-fn about_card_width_is_the_frameworks_about_width() {
-    // The card width is `ModalSizing::about()`'s figure, read through the
-    // framework — not a number this module owns. The retired app value was
-    // 620px; the spec row is 440px, so this assertion is the pin that
-    // keeps the 180px reduction intentional rather than accidental.
+fn the_card_fills_the_viewport_on_both_axes() {
+    // The owner's ruling: the card takes most of the window instead of
+    // fitting its content. One ratio answers both axes.
+    assert_eq!(ABOUT_VIEWPORT_FILL, 0.8);
+    assert_eq!(about_card_width(1200.0), 960.0);
+    assert_eq!(about_card_height(800.0), 640.0);
     assert_eq!(
-        about_card_width(ROOMY_VIEWPORT.width),
-        hoarfrost::surface::modal::ABOUT_WIDTH
-    );
-    assert_eq!(about_card_width(ROOMY_VIEWPORT.width), 440.0);
-    assert_ne!(
-        about_card_width(ROOMY_VIEWPORT.width),
-        620.0,
-        "the retired ABOUT_CARD_WIDTH must not come back"
+        about_card_size(Size::new(1200.0, 800.0)),
+        Size::new(960.0, 640.0)
     );
 }
 
 #[test]
+fn the_card_states_its_own_policy_not_the_spec_row() {
+    // The retired policy pinned the card to `ModalSizing::about()`: 440px
+    // wide, content-fit tall. Both are gone on purpose, and this pin keeps
+    // the replacement deliberate rather than accidental.
+    assert!(about_card_width(ROOMY_VIEWPORT.width) > hoarfrost::surface::modal::ABOUT_WIDTH);
+    assert_eq!(AboutWindow::About.sizing(), ABOUT_SIZING);
+    assert_ne!(
+        AboutWindow::About.sizing(),
+        hoarfrost::surface::modal::ModalSizing::about(),
+        "the card overrides §4.6.2 rather than restating it"
+    );
+}
+
+#[test]
+fn the_width_keeps_the_retired_spec_width_as_its_floor() {
+    // Below a ~550px window 80% is narrower than the width the metadata row
+    // and the three-column credits table were measured in, so `ABOUT_WIDTH`
+    // holds the floor until the fill passes it.
+    let spec = hoarfrost::surface::modal::ABOUT_WIDTH;
+    assert_eq!(about_card_width(500.0), spec, "floored");
+    assert_eq!(about_card_width(550.0), spec, "exactly at the crossover");
+    assert_eq!(about_card_width(600.0), 480.0, "the fill has passed it");
+}
+
+#[test]
+fn the_height_has_no_floor_and_the_gutter_wins_last() {
+    // §4.6.2 gives About a content-fit height with no ceiling, so there is no
+    // framework figure for the override to defend: a short window gets a
+    // short card and the scroll regions inside it absorb the difference.
+    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
+    assert_eq!(about_card_height(400.0), 320.0);
+    assert_eq!(about_card_height(gutter + 100.0), 100.0, "gutter clamp");
+    assert_eq!(about_card_height(100.0), 100.0 - gutter, "gutter over fill");
+}
+
+#[test]
 fn about_card_width_clamps_to_the_viewport_gutter() {
-    // The clamp bites only once the viewport is too narrow to hold 440px
-    // plus the gutter: below 472px the card gives way to the viewport and
-    // never crosses the gutter the framework declares.
+    // The gutter is applied last and always wins, so neither the 80% fill nor
+    // the width floor can overflow a tiny viewport.
     let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
     assert_eq!(about_card_width(440.0 + gutter), 440.0, "exactly roomy");
     assert_eq!(about_card_width(400.0), 400.0 - gutter, "clamped");
@@ -252,6 +322,8 @@ fn about_card_width_never_goes_negative() {
     // (zero) width rather than a negative rectangle.
     assert_eq!(about_card_width(10.0), 0.0);
     assert_eq!(about_card_width(0.0), 0.0);
+    assert_eq!(about_card_height(10.0), 0.0);
+    assert_eq!(about_card_height(0.0), 0.0);
 }
 
 #[test]
@@ -259,26 +331,56 @@ fn about_card_builds_at_every_clamped_width() {
     // The card must construct at a hairline viewport as well as a roomy
     // one — the gutter clamp must not leave the layout unable to build.
     let vm = known_vm();
+    let credits = credits_vm();
     for width in [1.0, 32.0, 440.0, 1280.0, 4096.0] {
         let viewport = Size::new(width, 800.0);
-        let _card: Element<'_, Message> = about_card(&vm, viewport);
+        let _card: Element<'_, Message> = about_card(&vm, &credits, viewport);
     }
 }
 
+/// Everything the card spends around the credits list, from the same terms
+/// [`credits_list_height`] charges ([`SubRegionBands::total`]).
+fn credits_furniture() -> f32 {
+    ABOUT_CREDITS_HEADER_BAND_HEIGHT
+        + 2.0 * modal_frame().content_padding
+        + ABOUT_CREDITS_FOOTER_BAND_HEIGHT
+}
+
 #[test]
-fn each_window_names_its_own_sizing_policy() {
+fn the_credits_region_is_solved_from_the_card_it_sits_in() {
+    // UIF-MOD-004: the list gets what the card has left after its own
+    // furniture, never a number of its own — and never more than the §2.2 cap.
+    let ordinary = about_card_height(800.0);
     assert_eq!(
-        AboutWindow::About.sizing(),
-        hoarfrost::surface::modal::ModalSizing::about()
+        credits_list_height(ordinary),
+        ordinary - credits_furniture(),
+        "an ordinary window leaves the list the card's remainder"
+    );
+    assert!(
+        credits_list_height(ordinary) < ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "on an ordinary window the remainder is what binds"
     );
     assert_eq!(
-        AboutWindow::Attributions.sizing(),
-        hoarfrost::surface::modal::ModalSizing::attributions()
+        credits_list_height(about_card_height(2000.0)),
+        ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "on a tall window the §2.2 cap binds instead"
     );
-    assert_ne!(
-        AboutWindow::About.sizing(),
-        AboutWindow::Attributions.sizing(),
-        "the two windows are different §4.6.2 rows and must not share a policy"
+    assert_eq!(
+        credits_list_height(credits_furniture()),
+        0.0,
+        "a card with nothing left gives the list nothing"
+    );
+}
+
+#[test]
+fn a_solved_zero_length_falls_back_to_fill_rather_than_a_void_child() {
+    // `Length::Fixed(0.0)` is void in iced 0.14 and would drop the scrollable
+    // — and with it its stable id — out of the tree entirely (AGENTS §5).
+    assert_eq!(credits_list_length(credits_furniture()), Length::Fill);
+    let ordinary = about_card_height(800.0);
+    assert_eq!(
+        credits_list_length(ordinary),
+        Length::Fixed(credits_list_height(ordinary))
     );
 }
 
@@ -332,80 +434,109 @@ fn scroll_bounds(ui: &mut Sim<'_>, id: &'static str) -> (iced::Rectangle, iced::
 }
 
 #[test]
-fn the_about_card_renders_exactly_440_wide() {
+fn the_about_card_renders_at_eighty_percent_of_the_window() {
+    // The claim the owner asked for, measured on the laid-out box rather than
+    // read off the policy: 80% of a 1280x800 window is 1024x640.
     let vm = known_vm();
-    let card = about_card(&vm, ROOMY_VIEWPORT);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, ROOMY_VIEWPORT);
     let mut ui = laid_out(ROOMY_VIEWPORT, card);
     let bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
     assert_eq!(
-        bounds.width, 440.0,
-        "the rendered card box must be the §4.6.2 width, not the retired 620"
+        bounds.width,
+        ROOMY_VIEWPORT.width * ABOUT_VIEWPORT_FILL,
+        "the rendered card box must be the fill it declares"
     );
+    assert_eq!(
+        bounds.height,
+        ROOMY_VIEWPORT.height * ABOUT_VIEWPORT_FILL,
+        "the rendered card box must be as tall as it is wide, proportionally"
+    );
+    assert_eq!(bounds.width, 1024.0);
+    assert_eq!(bounds.height, 640.0);
     drop(ui);
 }
 
 #[test]
 fn the_about_card_content_is_the_width_less_the_frame_padding() {
-    // 440 outer with space::LG on both sides leaves 408 of content. The
-    // card is 440 *including* its padding, so the usable width is not
-    // 440 — a claim a caller could otherwise easily make.
+    // The card is its width *including* padding, so the usable width is not
+    // the fill — a claim a caller could otherwise easily make.
     let frame = modal_frame();
     let content = about_card_width(ROOMY_VIEWPORT.width) - 2.0 * frame.content_padding;
-    assert_eq!(content, 408.0);
+    assert_eq!(content, 992.0);
     assert_eq!(frame.content_padding, hoarfrost::token::space::LG);
 }
 
 #[test]
 fn the_about_card_fits_a_768px_viewport_without_overflow() {
-    // The §4.6.2 height policy for About is content-fit with no ceiling,
-    // so the only real bound is the viewport. Measured at 768px — the
-    // card is 624 tall, leaving 144px of headroom, so the footer and the
-    // bottom divider stay on screen.
+    // A viewport-sized card cannot be taller than its window by construction,
+    // which is what the retired content-fit card could not promise: that one
+    // measured 624px and only fitted a 768px window by luck.
     let vm = AboutViewModel::from_build();
     let viewport = Size::new(1024.0, 768.0);
-    let card = about_card(&vm, viewport);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, viewport);
     let mut ui = laid_out(viewport, card);
     let bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
-    assert_eq!(bounds.width, 440.0);
     assert!(
         bounds.height <= viewport.height,
-        "the About card measured {:.0}px tall against a {:.0}px viewport — \
-         a content-fit card taller than the window would push its footer off \
-         screen",
+        "the About card measured {:.0}px tall against a {:.0}px viewport — a \
+         viewport-sized card must never outgrow its own window",
         bounds.height,
         viewport.height
+    );
+    assert_eq!(bounds.width, viewport.width * ABOUT_VIEWPORT_FILL);
+    assert_eq!(bounds.height, viewport.height * ABOUT_VIEWPORT_FILL);
+    drop(ui);
+}
+
+#[test]
+fn the_license_region_keeps_its_declared_cap() {
+    // Whatever the window, the licence region is *given* the cap it declares.
+    // Whether the MIT body overflows it is a question of width: at the retired
+    // 440px card it measured 480px of text and scrolled; at the wide 80% card
+    // it fits and simply does not. Either way nothing is clipped, because the
+    // region is a scrollable and not a fixed label.
+    let vm = AboutViewModel::from_build();
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let (region, content) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
+    assert_eq!(
+        region.height, LICENSE_MAX_HEIGHT,
+        "the licence region must be exactly the cap it declares"
+    );
+    assert!(
+        content.height > 0.0,
+        "the MIT body must be laid out inside the region, not dropped"
     );
     drop(ui);
 }
 
 #[test]
-fn the_real_license_body_is_scrolled_not_clipped() {
-    // The real MIT body reflowed at 408px is taller than the 200px
-    // region, so the scrollable's content exceeds its viewport and every
-    // word stays reachable. If this ever stops holding, the licence text
-    // has shrunk below the cap and the cap itself should be revisited —
-    // not the assertion quietly widened.
+fn a_license_body_longer_than_the_region_scrolls() {
+    // The hazard the cap exists for, measured where it still bites: a narrow
+    // card reflows the MIT body to far more than 200px, so the content
+    // overflows the region and every word stays reachable. If this ever stops
+    // holding, the licence has shrunk and the cap should be re-decided rather
+    // than this assertion quietly widened.
     let vm = AboutViewModel::from_build();
-    let card = about_card(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let (viewport_bounds, content_bounds) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
-    assert_eq!(
-        viewport_bounds.height, LICENSE_MAX_HEIGHT,
-        "the licence region must be exactly the cap it declares"
-    );
-    assert_eq!(
-        content_bounds.height, 480.0,
-        "the MIT body reflowed at 408px lays out to 24 BODY lines (24 x 20 = \
-         480px); if this changes the licence changed, and the cap should be \
-         re-decided rather than this number quietly widened"
-    );
+    let viewport = Size::new(560.0, 1200.0);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, viewport);
+    let mut ui = laid_out(viewport, card);
+    let (region, content) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
+    assert_eq!(region.height, LICENSE_MAX_HEIGHT);
     assert!(
-        content_bounds.height > viewport_bounds.height,
+        content.height > region.height,
         "expected the licence body ({:.0}px) to overflow the {:.0}px region so \
-         it scrolls; if it no longer does, LICENSE_MAX_HEIGHT is dead weight \
-         and should be dropped rather than left lying",
-        content_bounds.height,
-        viewport_bounds.height
+         it scrolls",
+        content.height,
+        region.height
     );
     drop(ui);
 }
@@ -437,57 +568,63 @@ fn a_body_rung_lays_out_on_its_declared_line_grid() {
 }
 
 #[test]
-fn the_about_card_is_content_fit_not_viewport_stretched() {
-    // §4.6.2 gives About a content-fit height. Measured: the card is the
-    // same height in a 768px window and a 2000px one, i.e. it takes the
-    // height its content needs and no more. Before the line-height fix this
-    // assertion failed — the card tracked the viewport exactly, because
-    // every text line claimed 280px and the natural height blew past any
-    // window.
+fn the_about_card_tracks_the_window_not_its_content() {
+    // The inverse of the retired behaviour: the card used to be the same
+    // height in a 768px window and a 2000px one (624px of content, both
+    // times). A viewport-sized card must instead track its window, so the
+    // same content in a bigger window produces a bigger card.
     let vm = AboutViewModel::from_build();
+    let credits = credits_vm();
     let short_window = Size::new(1024.0, 768.0);
     let tall_window = Size::new(1024.0, 2000.0);
 
-    let short_card = about_card(&vm, short_window);
+    let short_card = about_card(&vm, &credits, short_window);
     let mut ui = laid_out(short_window, short_card);
     let short = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
     drop(ui);
 
-    let tall_card = about_card(&vm, tall_window);
+    let tall_card = about_card(&vm, &credits, tall_window);
     let mut ui = laid_out(tall_window, tall_card);
     let tall = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
     drop(ui);
 
-    assert_eq!(
+    assert_ne!(
         short.height, tall.height,
-        "a content-fit card must not track the window: {short:?} vs {tall:?}"
+        "a viewport-sized card must track the window: {short:?} vs {tall:?}"
     );
-    assert_ne!(short.height, tall_window.height);
-    assert_eq!(
-        short.height, 624.0,
-        "the About card lays out 440 x 624 at the §4.6.2 width"
-    );
+    assert_eq!(short.height, short_window.height * ABOUT_VIEWPORT_FILL);
+    assert_eq!(tall.height, tall_window.height * ABOUT_VIEWPORT_FILL);
+    assert!(tall.height < tall_window.height, "and never fill it");
 }
 
 #[test]
-fn a_short_viewport_compresses_the_licence_region_rather_than_overflowing() {
-    // The card cannot be shorter than its fixed rows, so on a very short
-    // window the licence region is what gives. Measured at 400px tall:
-    // the card is 400 and the licence region 150 — still scrollable, and
-    // nothing is pushed off screen.
+fn a_short_viewport_collapses_the_credits_region_without_losing_it() {
+    // A 400px window gives a 320px card, which is less than the card's own
+    // furniture. The licence keeps its declared cap and the credits list takes
+    // the shortfall — and because the solved zero is rendered as `Fill` rather
+    // than `Length::Fixed(0.0)`, the scrollable is still in the tree with its
+    // stable id instead of being silently dropped (AGENTS §5, §6).
     let vm = AboutViewModel::from_build();
     let viewport = Size::new(1024.0, 400.0);
-    let card = about_card(&vm, viewport);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, viewport);
     let mut ui = laid_out(viewport, card);
     let bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
-    let (region, content) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
-    assert_eq!(bounds.height, 400.0);
+    let (licence, licence_content) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
+    let (credits_region, _) =
+        scroll_bounds(&mut ui, crate::ui_iced::attributions::ATTRIBUTIONS_LIST_ID);
+    assert_eq!(bounds.height, viewport.height * ABOUT_VIEWPORT_FILL);
     assert!(
-        region.height > 0.0 && region.height < LICENSE_MAX_HEIGHT,
-        "the licence region should absorb the shortfall, got {:.0}px",
-        region.height
+        licence.height <= LICENSE_MAX_HEIGHT,
+        "the licence region must not exceed its cap, got {:.0}px",
+        licence.height
     );
-    assert!(content.height > region.height, "and still scroll");
+    assert!(licence_content.height > licence.height, "and still scroll");
+    assert!(
+        credits_region.height <= credits_list_height(bounds.height),
+        "the credits list must not claim more than the solver gave it"
+    );
     drop(ui);
 }
 
@@ -497,7 +634,9 @@ fn the_card_renders_inside_a_narrow_viewport_without_clipping_itself() {
     // has to reach the box, not just the reported number.
     let vm = known_vm();
     let viewport = Size::new(300.0, 800.0);
-    let card = about_card(&vm, viewport);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, viewport);
     let mut ui = laid_out(viewport, card);
     let bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
     assert_eq!(
@@ -516,7 +655,9 @@ fn the_close_button_survives_the_narrow_card_and_is_not_icon_only() {
     // exercises that path for real.
     let vm = known_vm();
     let viewport = Size::new(300.0, 800.0);
-    let card = about_card(&vm, viewport);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, viewport);
     let mut ui = laid_out(viewport, card);
     let bounds = ui
         .find(|candidate: Candidate<'_>| match candidate {
@@ -539,7 +680,9 @@ fn the_bounded_trait_reports_the_card_as_visible() {
     // visible bounds inside the window, so the numbers above are being
     // read from a laid-out tree and not a default rectangle.
     let vm = known_vm();
-    let card = about_card(&vm, ROOMY_VIEWPORT);
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, ROOMY_VIEWPORT);
     let mut ui = laid_out(ROOMY_VIEWPORT, card);
     let target = ui
         .find(iced::widget::Id::from(ABOUT_CARD_ID))
@@ -551,6 +694,85 @@ fn the_bounded_trait_reports_the_card_as_visible() {
     drop(ui);
 }
 
+// --- The credits list is inline ------------------------------------------
+
+#[test]
+fn the_credits_list_is_inside_the_card_and_gets_its_solved_height() {
+    use crate::ui_iced::attributions::ATTRIBUTIONS_LIST_ID;
+
+    let vm = known_vm();
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let card_bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
+    let (list, list_content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+
+    // The height is the solver's answer, not a number the widget picked.
+    match credits_list_length(card_bounds.height) {
+        Length::Fixed(solved) => assert_eq!(list.height, solved),
+        other => panic!("an ordinary window leaves room, so the list must be Fixed, got {other:?}"),
+    }
+    assert!(
+        list_content.height > 0.0,
+        "the credits table must be laid out inside the scroll area"
+    );
+    // The overflow hazard the solved height carries: an understated band
+    // would push the list past the card it is inside.
+    assert!(
+        list.y >= card_bounds.y && list.x >= card_bounds.x,
+        "the list must start inside the card: list {list:?} card {card_bounds:?}"
+    );
+    assert!(
+        list.y + list.height <= card_bounds.y + card_bounds.height + 0.01,
+        "the credits list must not hang below its card: \
+         list {list:?} card {card_bounds:?}"
+    );
+    drop(ui);
+}
+
+#[test]
+fn the_card_offers_no_button_to_open_a_credits_window() {
+    // The teaser button and the separate credits window were removed by
+    // ruling. The label is written out here rather than referenced, because
+    // the constant it used to read is gone — this assertion is the pin that
+    // keeps it gone.
+    let vm = known_vm();
+    // The card borrows the credits snapshot, so it must outlive the card.
+    let credits = credits_vm();
+    let card = about_card(&vm, &credits, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    assert!(
+        ui.find("View third-party attributions...").is_err(),
+        "the teaser button must not come back: the credits list is inline"
+    );
+    assert!(
+        ui.find(strings::ABOUT_ATTRIBUTIONS_HEADER).is_ok(),
+        "the section header is how the credits list is introduced instead"
+    );
+    assert!(
+        ui.find(strings::format_attribution_count(3).as_str())
+            .is_ok(),
+        "the count line names the rows the card is showing"
+    );
+    drop(ui);
+}
+
+#[test]
+fn an_empty_catalog_still_renders_the_credits_section() {
+    // AGENTS §6: the empty state is text, not a different widget tree.
+    let vm = known_vm();
+    let empty = AttributionsViewModel::with_entries(Vec::new());
+    let card = about_card(&vm, &empty, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    assert!(
+        ui.find(strings::ABOUT_ATTRIBUTIONS_EMPTY).is_ok(),
+        "the empty-state line must be shown"
+    );
+    let _ = scroll_bounds(&mut ui, crate::ui_iced::attributions::ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+}
+
 // --- Window state --------------------------------------------------------
 
 #[test]
@@ -558,7 +780,6 @@ fn default_window_state_is_closed() {
     let state = AboutWindowState::new();
     assert!(!state.is_open());
     assert!(!state.is_about());
-    assert!(!state.is_attributions());
     assert_eq!(state.window(), None);
     assert_eq!(state, AboutWindowState::default());
 }
@@ -575,23 +796,22 @@ fn opening_a_window_reports_the_change() {
 #[test]
 fn opening_the_same_window_again_reports_no_change() {
     let mut state = AboutWindowState::new();
-    assert!(state.open_attributions());
+    assert!(state.open_about());
     assert!(
-        !state.open_attributions(),
+        !state.open_about(),
         "a redundant open must not report a visible change"
     );
-    assert!(state.is_attributions());
+    assert!(state.is_about());
 }
 
 #[test]
-fn opening_a_window_replaces_the_previous_one() {
-    // One window at a time — the same rule `DialogState` and
-    // `OverlaySlot::open_modal` apply.
-    let mut state = AboutWindowState::new();
-    state.open_about();
-    assert!(state.open_attributions());
-    assert!(state.is_attributions());
-    assert!(!state.is_about());
+fn the_window_state_names_the_one_window_it_can_open() {
+    // `AboutWindow` is a single-variant marker now that the credits list is
+    // inside the card. The pin is here so a second variant stays a decision
+    // rather than an accident: it would need a registry surface id, an
+    // `OverlayLayer` and an escape-rank row with it.
+    assert_eq!(AboutWindow::About.title(), strings::ABOUT_DIALOG_TITLE);
+    assert_eq!(AboutWindow::About.sizing(), ABOUT_SIZING);
 }
 
 #[test]
@@ -605,14 +825,6 @@ fn close_reports_whether_a_window_was_open() {
     assert!(state.close());
     assert!(!state.is_open());
     assert!(!state.close());
-}
-
-#[test]
-fn apply_attributions_requested_opens_the_credits_window() {
-    let mut state = AboutWindowState::new();
-    assert!(state.apply(AboutMessage::AttributionsRequested));
-    assert!(state.is_attributions());
-    assert!(!state.open_attributions(), "already showing credits");
 }
 
 #[test]
@@ -645,19 +857,17 @@ fn apply_absorbed_is_an_observable_no_op() {
     // between "the press was swallowed by the card" and "the press never
     // arrived" (FMD-071), and it is what keeps a padding click from
     // reading as a dismissal.
-    for window in [AboutWindow::About, AboutWindow::Attributions] {
-        let mut state = AboutWindowState::new();
-        state.open(window);
-        assert!(
-            !state.apply(AboutMessage::Absorbed),
-            "absorption must not report a visible change"
-        );
-        assert_eq!(
-            state.window(),
-            Some(window),
-            "absorption must not close the {window:?} window"
-        );
-    }
+    let mut state = AboutWindowState::new();
+    state.open(AboutWindow::About);
+    assert!(
+        !state.apply(AboutMessage::Absorbed),
+        "absorption must not report a visible change"
+    );
+    assert_eq!(
+        state.window(),
+        Some(AboutWindow::About),
+        "absorption must not close the card"
+    );
 }
 
 #[test]
@@ -668,11 +878,13 @@ fn absorbed_is_not_close_requested() {
 }
 
 #[test]
-fn window_titles_come_from_strings() {
-    assert_eq!(AboutWindow::About.title(), strings::ABOUT_DIALOG_TITLE);
+fn the_credits_header_is_a_section_title_from_strings() {
+    // It used to double as the second window's title. Now it is only the
+    // heading of the section inside the About card, and it still comes from
+    // `strings` rather than being written at the call site.
     assert_eq!(
-        AboutWindow::Attributions.title(),
-        strings::ABOUT_ATTRIBUTIONS_HEADER
+        strings::ABOUT_ATTRIBUTIONS_HEADER,
+        "Third-Party Attributions"
     );
 }
 

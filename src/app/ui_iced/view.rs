@@ -38,7 +38,6 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::about::about_card;
 use crate::ui_iced::agent::agent_panel;
 use crate::ui_iced::app::{AppState, OverlayLayer, TooltipId};
-use crate::ui_iced::attributions::attributions_view;
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_modal};
 use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
@@ -430,12 +429,11 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             state.overlay.tools.is_resizing(),
         ),
         OverlayLayer::About => modal_centered(
-            about_card(&state.models.about, state.viewport),
-            Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
-            Message::About(crate::ui_iced::message::AboutMessage::CloseRequested),
-        ),
-        OverlayLayer::Attributions => modal_centered(
-            attributions_view(&state.models.attributions, state.viewport),
+            about_card(
+                &state.models.about,
+                &state.models.attributions,
+                state.viewport,
+            ),
             Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
             Message::About(crate::ui_iced::message::AboutMessage::CloseRequested),
         ),

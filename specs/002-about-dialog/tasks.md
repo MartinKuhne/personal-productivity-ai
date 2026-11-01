@@ -7,6 +7,12 @@ description: "Task list for About Dialog feature"
 **Input**: Design documents from `/specs/002-about-dialog/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/about-dialog.md, quickstart.md
 
+> **History (2026-10-31)**: these tasks record the original **egui** build and
+> are complete as written. The feature has since been rebuilt on iced; the
+> shipped behaviour is in the [spec's Amendments](spec.md#amendments). Task text
+> keeps its original wording; names and counts were corrected to the shipped
+> values.
+
 **Tests**: Included per SC-007 (nextest + egui_kittest). Write tests first and ensure they FAIL before implementation where noted.
 
 **Organization**: Tasks grouped by user story to enable independent implementation and testing. Foundational tasks already partially implemented on disk — marked as Verify where no code change is expected.
@@ -59,7 +65,7 @@ description: "Task list for About Dialog feature"
 
 **Goal**: About dialog header shows app name, copyright, branch, short commit hash (with full-hash hover tooltip and click-to-copy), and build date
 
-**Independent Test**: Open About dialog → verify header `FastMD Viewer` and `Copyright (c) 2026 Martin Kuhne` → verify `Branch:` + `BUILD_BRANCH`, `Commit:` + 7–8 char hash, `Built:` + `YYYY-MM-DD` → hover commit hash shows `Full commit: <40 chars>` tooltip → click commit hash copies full 40-char hash to clipboard
+**Independent Test**: Open About dialog → verify header `FastMD AI` and `Copyright (c) 2026 Martin Kuhne` → verify `Branch:` + `BUILD_BRANCH`, `Commit:` + 7–8 char hash, `Built:` + `YYYY-MM-DD` → hover commit hash shows `Full commit: <40 chars>` tooltip → click commit hash copies full 40-char hash to clipboard
 
 ### Tests for User Story 2
 
@@ -98,24 +104,24 @@ description: "Task list for About Dialog feature"
 
 ## Phase 6: User Story 4 - Browse Third-Party Attributions (Priority: P2)
 
-**Goal**: Structured scrollable list of all 58 direct third-party dependencies with name (strong), authors, and clickable GitHub URL opening in external browser
+**Goal**: Structured scrollable list of all 61 direct third-party dependencies with name (strong), authors, and clickable GitHub URL opening in external browser
 
-**Independent Test**: Open About dialog → scroll to `Third-Party Attributions` → verify 58 rows sorted alphabetically, each with crate name, authors, `https://github.com/...` hyperlink → scroll within attributions area reveals all rows → click any link opens browser → no duplicates or empty fields
+**Independent Test**: Open About dialog → scroll to `Third-Party Attributions` → verify 61 rows sorted alphabetically, each with crate name, authors, `https://github.com/...` hyperlink → scroll within attributions area reveals all rows → click any link opens browser → no duplicates or empty fields
 
 ### Tests for User Story 4
 
-- [X] T020 [P] [US4] Create test `attribution_all_entries_have_valid_fields` in `src/app/ui/attributions_tests.rs` asserting each of 58 `Attribution` entries has non-empty `name`, `authors`, `github_url` starting with `https://github.com/`
+- [X] T020 [P] [US4] Create test `attribution_all_entries_have_valid_fields` in `src/app/ui/attributions_tests.rs` asserting each of 61 `Attribution` entries has non-empty `name`, `authors`, `github_url` starting with `https://github.com/`
 - [X] T021 [P] [US4] Create test `attribution_slice_is_sorted_and_unique` in `src/app/ui/attributions_tests.rs` asserting `DIRECT_DEPENDENCIES` is sorted ascending by `name` and contains no duplicate names
 - [X] T022 [P] [US4] Create completeness test `attribution_completeness_against_cargo_manifests` in `src/app/ui/attributions_tests.rs` that parses workspace `Cargo.toml` members (`fastmd`, `fastmd-agent`, `fastmd-pdf`, `fastmd-tool-macros`), collects direct third-party deps minus workspace members, and asserts set equality with `DIRECT_DEPENDENCIES` names
-- [X] T023 [P] [US4] Create kittest test `attributions_all_58_rendered_and_scrollable` in `src/app/ui/about_dialog_tests.rs` verifying scroll area `id_salt "about_attributions_scroll" max_height 240.0` renders 58 rows with strong name, authors label, and hyperlink
+- [X] T023 [P] [US4] Create kittest test `attributions_all_58_rendered_and_scrollable` in `src/app/ui/about_dialog_tests.rs` verifying scroll area `id_salt "about_attributions_scroll" max_height 240.0` renders 61 rows with strong name, authors label, and hyperlink
 
 ### Implementation for User Story 4
 
-- [X] T024 [P] [US4] Create `src/app/ui/attributions.rs` with `//!` doc (`//! Attribution catalog ... Unit tests live in the sibling ...`), `pub struct Attribution { pub name: &'static str, pub authors: &'static str, pub github_url: &'static str }` with `///` on each field, and `pub const DIRECT_DEPENDENCIES: &[Attribution] = &[...58 curated entries alphabetically sorted...]` covering all workspace direct deps (anyhow through windows as listed in plan)
+- [X] T024 [P] [US4] Create `src/app/ui/attributions.rs` with `//!` doc (`//! Attribution catalog ... Unit tests live in the sibling ...`), `pub struct Attribution { pub name: &'static str, pub authors: &'static str, pub github_url: &'static str }` with `///` on each field, and `pub const DIRECT_DEPENDENCIES: &[Attribution] = &[...61 curated entries alphabetically sorted...]` covering all workspace direct deps (anyhow through windows as listed in plan)
 - [X] T025 [US4] Implement Attributions section in `src/app/ui/about_dialog.rs` — `ui.label(ABOUT_ATTRIBUTIONS_HEADER)`, `egui::ScrollArea::vertical().id_salt("about_attributions_scroll").max_height(240.0).show(ui, |ui| for attr in DIRECT_DEPENDENCIES { ui.push_id((attr.name, "attribution_row"), |ui| { ui.strong(attr.name); ui.label(attr.authors); ui.hyperlink_to(attr.github_url, attr.github_url); }) })` with fallback `ABOUT_UNKNOWN_AUTHOR` if needed and error-tolerant `open_url` handling
 - [X] T026 [US4] Implement close affordance wiring in `src/app/ui/about_dialog.rs` — `Window::open(&mut open)` write-back sets `app.dialogs_mut().about_dialog_open = false` when user clicks title-bar X, and add kittest `close_button_clears_dialog_flag` in `src/app/ui/about_dialog_tests.rs`
 
-**Checkpoint**: US4 independently testable — all attribution tests pass; manual: 58 rows visible, links open, sorted, scrollable
+**Checkpoint**: US4 independently testable — all attribution tests pass; manual: 61 rows visible, links open, sorted, scrollable
 
 ---
 
@@ -126,7 +132,7 @@ description: "Task list for About Dialog feature"
 - [X] T027 [P] Add `//!` module docs and `///` on every `pub` item in `src/app/ui/attributions.rs` and `src/app/ui/about_dialog.rs` per RUST-010/RUST-011, and ensure sidecar header pointer line when `#[cfg(test)] mod tests;` is used
 - [X] T028 Verify `src/app/ui/mod.rs` remains facade-only (no logic) and `src/app` contains no `eframe::egui` imports outside `ui/` per RUST-058 / `app/` is egui-free
 - [X] T029 Run quality gate from repository root: `cargo check --quiet` — no errors/warnings, `cargo nextest run --workspace --status-level fail --show-progress none` — all tests pass, `cargo clippy -- -D warnings` — no lints, `cargo fmt --check` — formatted, `cargo doc --no-deps --quiet` — no warnings
-- [X] T030 Run `specs/002-about-dialog/quickstart.md` manual validation end-to-end (hamburger → About → hover → click-to-copy → license scroll → 58 attributions → link open → close → offline fallback with `GIT_BRANCH=unknown GIT_COMMIT=unknown`)
+- [X] T030 Run `specs/002-about-dialog/quickstart.md` manual validation end-to-end (hamburger → About → hover → click-to-copy → license scroll → 61 attributions → link open → close → offline fallback with `GIT_BRANCH=unknown GIT_COMMIT=unknown`)
 
 ---
 
@@ -207,7 +213,7 @@ Task: "Create interaction test commit_hover_shows_full_hash_and_click_copies in 
 2. Add US1 → Test independently → Demo (MVP!)
 3. Add US2 (build metadata header + clipboard) → Test independently → Demo — provenance visible
 4. Add US3 (license scroll) → Test independently → Demo — legal text complete
-5. Add US4 (58 attributions catalog + scroll + links) → Test independently → Demo — full feature per SC-003
+5. Add US4 (61 attributions catalog + scroll + links) → Test independently → Demo — full feature per SC-003
 6. Polish (docs + quality gate + quickstart) → `cargo nextest --workspace` + manual QA passes, ready for PR
 
 ### Parallel Team Strategy

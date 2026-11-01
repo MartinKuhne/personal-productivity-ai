@@ -208,10 +208,23 @@ fn reduce_movable(state: &mut AppState, message: MovableMessage) -> Task<Message
     let mut storage =
         UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, state.storage.as_ref());
 
-    // The press position is the last cursor the view reported for this
-    // card. `mouse_area::on_press` carries no point in iced 0.14, so the
-    // move lane is the only source of a coordinate (see `MovableMessage`).
-    let at = cursor.unwrap_or_else(|| host.card().position());
+    // The press position is the last position this card's *own* lane
+    // reported. `mouse_area::on_press` carries no point in iced 0.14, so the
+    // move lane is the only source of a coordinate (see `MovableMessage`) —
+    // and it has to be this lane rather than the base layer's cursor: iced's
+    // `Stack` levitates the cursor past every layer below one that claims a
+    // mouse interaction (`stack.rs:266-273`), which the title bar's `Grab`
+    // and the grip's diagonal-resize cursor both do, so the base layer
+    // reports nothing while the pointer sits on the very controls that need
+    // positioning. A `Moved` therefore both drives the gesture and refreshes
+    // the stored press position.
+    let at = match &message {
+        MovableMessage::Moved { at: point, .. } => {
+            *cursor = Some(*point);
+            *point
+        }
+        _ => cursor.unwrap_or_else(|| host.card().position()),
+    };
 
     let (phase, target) = match &message {
         MovableMessage::Moved { .. } => (PointerPhase::Moved, SurfaceTarget::Outside),
@@ -220,7 +233,6 @@ fn reduce_movable(state: &mut AppState, message: MovableMessage) -> Task<Message
         MovableMessage::GripPressed { handle, .. } => {
             (PointerPhase::Pressed, SurfaceTarget::Resize(*handle))
         }
-        MovableMessage::DockRequested { .. } => (PointerPhase::Pressed, SurfaceTarget::Dock),
         MovableMessage::CloseRequested { .. } => (PointerPhase::Pressed, SurfaceTarget::Close),
         MovableMessage::Released { .. } => (PointerPhase::Released, SurfaceTarget::Outside),
     };
@@ -2367,7 +2379,7 @@ fn confirmed_command(
 
 // ───────────────────────────── about / batch / tools / debug ─────────────────────────────
 
-/// About / attributions window reductions.
+/// About card reductions — identity metadata and its inline credits list.
 fn reduce_about(state: &mut AppState, message: AboutMessage) -> Vec<Task<Message>> {
     match message {
         AboutMessage::CopyCommitHashRequested => {
