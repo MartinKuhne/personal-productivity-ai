@@ -1,11 +1,11 @@
 //! The file-tree and document-tab context menus rendered by the `hoarfrost`
 //! menu engine (integration increment INT-3b, `UIF-CMENU-001`/`-002`).
 //!
-//! Both context menus are now [`Menu`](hoarfrost::surface::menu::model::Menu)
+//! Both context menus are now `hoarfrost::surface::menu::model::Menu`
 //! values whose openness is owned by a
-//! [`MenuCascade`](hoarfrost::surface::menu::cascade::MenuCascade), whose card
-//! comes from [`anchor::solve`](hoarfrost::geometry::anchor::solve) and whose
-//! rows are [`MenuRow`](hoarfrost::surface::menu::view::MenuRow) widgets. The
+//! `hoarfrost::surface::menu::cascade::MenuCascade`, whose card
+//! comes from `hoarfrost::geometry::anchor::solve` and whose
+//! rows are `hoarfrost::surface::menu::view::MenuRow` widgets. The
 //! card chrome, the row grid and the open-card rectangle walk are shared with
 //! the hamburger through [`menu_surface`]; only the anchor and the row
 //! vocabulary are specific to this module.
@@ -14,9 +14,9 @@
 //!
 //! | Gap | How it is closed |
 //! |---|---|
-//! | No separators — the card was a uniform column of buttons, so §4.9.1's functional groups were carried by row order alone | Rows carry a [`ContextGroup`](crate::ui_iced::context_menu::ContextGroup) and [`menu_from_rows`](crate::ui_iced::context_menu::menu_from_rows) emits a real `Row::separator()` at every group boundary, so [`Menu::groups`](hoarfrost::surface::menu::model::Menu::groups) reports the groups the spec names |
-//! | Destructive rows were visually indistinguishable | [`ContextGroup::Destructive`](crate::ui_iced::context_menu::ContextGroup::Destructive) marks them, which is what [`Menu::validate`](hoarfrost::surface::menu::model::Menu::validate) requires to be the final group |
-//! | Placement was a hand-clamped point | [`Anchor::Pointer`](hoarfrost::geometry::anchor::Anchor::Pointer) runs the framework's quadrant-flip and viewport-clamp rules (`UIF-CMENU-001`) |
+//! | No separators — the card was a uniform column of buttons, so §4.9.1's functional groups were carried by row order alone | Rows carry a [`ContextGroup`](crate::ui_iced::context_menu::ContextGroup) and [`menu_from_rows`](crate::ui_iced::context_menu::menu_from_rows) emits a real `Row::separator()` at every group boundary, so `hoarfrost::surface::menu::model::Menu::groups` reports the groups the spec names |
+//! | Destructive rows were visually indistinguishable | [`ContextGroup::Destructive`](crate::ui_iced::context_menu::ContextGroup::Destructive) marks them, which is what `hoarfrost::surface::menu::model::Menu::validate` requires to be the final group |
+//! | Placement was a hand-clamped point | `hoarfrost::geometry::anchor::Anchor::Pointer` runs the framework's quadrant-flip and viewport-clamp rules (`UIF-CMENU-001`) |
 //! | The registered surface was an empty region | [`open_card_rects`](crate::ui_iced::context_menu::open_card_rects) solves the real card rectangle and the reducer registers it, so `route_pointer` answers `PointerTarget::Surface` inside the card |
 //!
 //! # Row intent is data, not a resolver
@@ -305,7 +305,7 @@ pub fn menu_from_rows(id: MenuId, rows: &[ContextRow]) -> Menu {
 /// A later row claiming a key already present **overwrites** the earlier
 /// entry, which is why the sidecar's `test_row_keys_are_unique` pins
 /// uniqueness: two rows sharing a key would also share a focus id, and
-/// [`Menu::validate`](hoarfrost::surface::menu::model::Menu::validate) would
+/// `hoarfrost::surface::menu::model::Menu::validate` would
 /// report `DuplicateKey` long before this table silently mis-routed anything.
 ///
 /// Purity: pure function of `rows`.

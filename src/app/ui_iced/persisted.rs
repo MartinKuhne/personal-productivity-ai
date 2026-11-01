@@ -268,7 +268,7 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
 ///
 /// # Call cadence
 ///
-/// [`MovableHost`](hoarfrost::surface::movable::MovableHost) calls
+/// `hoarfrost::surface::movable::MovableHost` calls
 /// [`load`](GeometryStorage::load) once when a card opens and
 /// [`save`](GeometryStorage::save) only when a drag or resize *settles* —
 /// never per frame — so the write-through never lands on a hot path and

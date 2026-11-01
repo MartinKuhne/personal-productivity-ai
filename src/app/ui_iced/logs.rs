@@ -420,7 +420,7 @@ impl ScrollSnapshot {
     }
 
     /// The same frame as the framework's [`ScrollGeometry`], for handing to
-    /// [`MovableHost::on_scroll`](hoarfrost::surface::movable::MovableHost).
+    /// `hoarfrost::surface::movable::MovableHost`.
     ///
     /// Note the field order differs from this struct's: the framework's
     /// constructor is `(offset, content, viewport)`, not
@@ -475,7 +475,7 @@ pub const fn auto_scroll_setting(auto_scroll: bool) -> AutoScrollSetting {
 /// position test still supplied by [`ScrollSnapshot::is_at_bottom`] and its
 /// [`BOTTOM_STICK_TOLERANCE`]. See that constant for why the app's margin
 /// stays tighter than the framework's
-/// [`AT_BOTTOM_TOLERANCE`](hoarfrost::surface::movable::AT_BOTTOM_TOLERANCE).
+/// `hoarfrost::surface::movable::AT_BOTTOM_TOLERANCE`.
 ///
 /// Exposed alongside [`should_follow`] because the two questions are
 /// different: `should_follow` answers "scroll now?", `follow_state` answers
@@ -816,7 +816,7 @@ pub fn logs_close_command() -> Message {
 }
 
 /// The footer `Close` label mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box.
 ///
 /// `Button::is_icon_only` is a **geometric** test — any content no wider

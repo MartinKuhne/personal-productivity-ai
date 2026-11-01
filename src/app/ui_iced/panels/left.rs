@@ -285,7 +285,7 @@ pub const ROW_INDENT_PER_DEPTH: f32 = tree_row::INDENT_STEP;
 /// Deepest depth the **auto-fit measurement** charges for indentation.
 ///
 /// **App-owned.** It is *not* the same rule as
-/// [`tree_view::MAX_TREE_DEPTH`](hoarfrost::composite::tree_view::MAX_TREE_DEPTH)
+/// `hoarfrost::composite::tree_view::MAX_TREE_DEPTH`
 /// (1000), which is a stack-overflow guard on the framework's recursive
 /// flatten.
 ///
@@ -2230,7 +2230,7 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 /// rather than against a remembered answer. It resolves to a **no-op** on
 /// hover, and that is a computed result, not an absence of handling:
 /// `surface_hover` is not a locked fill under
-/// [`fill_lock_role`](hoarfrost::token::contrast::fill_lock_role), so
+/// `hoarfrost::token::contrast::fill_lock_role`, so
 /// `locked_over` returns the candidate untouched. The sidecar pins the
 /// measured ratios rather than transcribing them.
 ///
@@ -2266,7 +2266,7 @@ pub const SEARCH_INPUT_ID: &str = "left_panel_search_input";
 ///
 /// This is the framework's *paint* on iced's *widget*, and that is as
 /// far as the search row can go today:
-/// [`composite::search_input`](hoarfrost::composite) **does not exist**
+/// `hoarfrost::composite` **does not exist**
 /// (the composite directory has breadcrumb, card, expander, form_field,
 /// info_bar, list_tile, notification, overflow_toolbar, scroll_view,
 /// settings_row, table_* , toast, tree_row, tree_view, virtual_list), and

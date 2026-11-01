@@ -26,7 +26,7 @@
 //!   [`combo_box::resolve_trigger`] — at the compact rung
 //!   [`TAG_TRIGGER_RUNG`], not through iced's own theme.
 //! * **Hamburger** — the framework's own
-//!   [`Button::icon_only`](hoarfrost::widget::button_widget::Button::icon_only)
+//!   `hoarfrost::widget::button_widget::Button::icon_only`
 //!   in the `Ghost` variant at the compact rung, carrying the ☰ from
 //!   [`strings::HAMBURGER_MENU_BUTTON`] plus the label
 //!   [`strings::HAMBURGER_MENU_TOOLTIP`] that `UIF-NAV-003` requires of
@@ -48,7 +48,7 @@
 //! a widget: it publishes [`combo_box::trigger_bounds`],
 //! [`combo_box::chevron_bounds`] and [`combo_box::resolve_trigger`] for the
 //! gallery's contrast audit, and no `ComboBox` type that renders an
-//! `Element`. The state half, [`ComboHost`](hoarfrost::widget::combo_host::ComboHost),
+//! `Element`. The state half, `hoarfrost::widget::combo_host::ComboHost`,
 //! drives open/filter/commit against a `FocusState` the app does not keep
 //! for this control. So the trigger's paint comes from the framework today
 //! while the flyout stays iced's. Adopting `ComboHost` here means giving the
@@ -64,7 +64,7 @@
 //! therefore kept in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state.
 //! The **render path** is separate: [`hamburger_menu`](crate::ui_iced::hamburger::hamburger_menu)
-//! builds the `hoarfrost` [`Menu`](hoarfrost::surface::menu::model::Menu) tree
+//! builds the `hoarfrost::surface::menu::model::Menu` tree
 //! the framework cascade drives, so the top bar itself only emits
 //! [`MenuMessage::Opened`]).
 //!

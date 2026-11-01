@@ -102,7 +102,7 @@
 //! for the same reason [`crate::ui_iced::about`] and
 //! [`crate::ui_iced::dialogs`] did not take it: the host self-registers
 //! its surface into a
-//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) and
+//! `hoarfrost::surface::zorder::SurfaceRegistry` and
 //! pushes its own focus trap, while this app already owns
 //! `SURFACE_ID_EDITOR` in
 //! [`crate::ui_iced::app::OverlayState::sync_surfaces`] and owns
@@ -135,7 +135,7 @@
 //! The confirmation is not a new surface. It reuses the INT-4 small dialog
 //! as [`DiscardEditorChanges`](crate::ui_iced::dialogs::DialogKind::DiscardEditorChanges),
 //! whose control row is the same
-//! [`InputControl::Confirmation`](hoarfrost::surface::input_dialog::InputControl::Confirmation)
+//! `hoarfrost::surface::input_dialog::InputControl::Confirmation`
 //! the delete confirmation uses and whose
 //! primary button is [`ButtonVariant::Danger`] labelled
 //! [`strings::DISCARD_ACTION`]. Composing the two surfaces works because
@@ -144,7 +144,7 @@
 //! `SURFACE_ID_DIALOG`), so:
 //!
 //! * a dirty `Escape` leaves the editor mounted, consumes the key
-//!   ([`UnwindAnswer::Unwound`](hoarfrost::surface::zorder::UnwindAnswer::Unwound)) and opens the confirmation centred over
+//!   (`hoarfrost::surface::zorder::UnwindAnswer::Unwound`) and opens the confirmation centred over
 //!   it;
 //! * `Discard` closes the dialog **and** the buffer;
 //! * `Cancel` closes only the dialog — the editor, and the edits in it,
@@ -262,7 +262,7 @@ impl LeaveGesture {
     /// the framework's `attempt_dismiss` shape speak the same language.
     ///
     /// `Cancel` maps to
-    /// [`DismissCause::Programmatic`](hoarfrost::surface::modal::DismissCause::Programmatic)
+    /// `hoarfrost::surface::modal::DismissCause::Programmatic`
     /// because that is the cause the framework's `ModalHost` treats as
     /// "the caller decided, `UIF-MOD-002` does not apply" — which is
     /// precisely what an explicit `Cancel` is.
@@ -637,7 +637,7 @@ impl EditorViewModel {
     /// Show a save failure, superseding whatever was showing.
     ///
     /// Returns what it replaced, mirroring
-    /// [`ModalHost::set_error`](hoarfrost::surface::modal::ModalHost::set_error):
+    /// `hoarfrost::surface::modal::ModalHost::set_error`:
     /// the banner changes by exactly two operations, this and
     /// [`clear_save_error`](Self::clear_save_error).
     pub fn set_save_error(&mut self, error: ModalError) -> Option<ModalError> {
@@ -648,7 +648,7 @@ impl EditorViewModel {
     ///
     /// Returns whether the banner **changed**: showing a refusal where none
     /// was showing is a change, re-noting the same refusal is not. That is
-    /// the contract [`ModalHost::set_error`](hoarfrost::surface::modal::ModalHost::set_error)
+    /// the contract `hoarfrost::surface::modal::ModalHost::set_error`
     /// keeps, and it is what lets a reducer tell a refusal worth repainting
     /// from a repeat of one already on screen.
     pub fn note_save_failed(&mut self) -> bool {
@@ -1089,7 +1089,7 @@ fn editor_footer(vm: &EditorViewModel) -> Element<'_, Message> {
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a

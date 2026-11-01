@@ -17,7 +17,7 @@
 //! [`TITLE_BAR_HEIGHT`] / [`FILTER_BAR_HEIGHT`] / [`FOOTER_HEIGHT`] rungs.
 //! The host is the single source of truth for where each band is, so the
 //! painted card and the rectangle
-//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) routes
+//! `hoarfrost::surface::zorder::SurfaceRegistry` routes
 //! pointer events against cannot disagree.
 //!
 //! # Pointer routing

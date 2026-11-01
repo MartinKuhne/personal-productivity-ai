@@ -162,7 +162,7 @@ pub fn link_activated_message(url: String) -> Message {
 /// paints *on* it moves.
 ///
 /// Ratios recomputed from raw sRGB through
-/// [`contrast::contrast_ratio`](hoarfrost::token::contrast::contrast_ratio),
+/// `hoarfrost::token::contrast::contrast_ratio`,
 /// not transcribed.
 ///
 /// Purity: pure.
@@ -303,9 +303,9 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 ///
 /// [`Button`] has no `.width()`
 /// builder — its width comes from the content `size_hint` inside a fixed
-/// control band ([`button::HEIGHT_COMPACT`](hoarfrost::widget::button::HEIGHT_COMPACT)
+/// control band (`hoarfrost::widget::button::HEIGHT_COMPACT`
 /// / `HEIGHT_STANDARD`), and the only width-shaped constructor is
-/// [`icon_only`](hoarfrost::widget::button_widget::Button::icon_only). A
+/// `hoarfrost::widget::button_widget::Button::icon_only`. A
 /// disclosure header has to stretch the full pane
 /// width so the whole row is the click target, which the framework control
 /// cannot express. That is a framework gap, not a preference — recorded here

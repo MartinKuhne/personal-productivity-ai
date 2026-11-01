@@ -117,7 +117,7 @@ pub const TOC_BASE_INDENT_PIXELS: f32 = space::XS;
 /// pixels (UI-001) — `space.md` (`UIF-TOK-001`).
 ///
 /// **Movement: none.** `12.0` is exactly `space.md`. Note this is
-/// deliberately *not* [`tree_row::INDENT_STEP`](hoarfrost::composite::tree_row::INDENT_STEP)
+/// deliberately *not* `hoarfrost::composite::tree_row::INDENT_STEP`
 /// (`space.lg`, 16): the ToC pane is the narrowest in the layout
 /// (`RIGHT_PANE_MIN_W = 120px`) and six heading levels at 16px would
 /// spend 80px of it on indentation alone. `space.md` is the nearest rung
@@ -164,7 +164,7 @@ pub const TOC_ROW_RIGHT_PAD_PIXELS: f32 = space::XS;
 pub const TOC_ROW_VERTICAL_PAD_PIXELS: f32 = space::XXS;
 
 /// Horizontal padding the entry's
-/// [`Button`](hoarfrost::widget::button_widget::Button) costs on **each** side, in
+/// `hoarfrost::widget::button_widget::Button` costs on **each** side, in
 /// logical pixels — `button.horizontal_padding` (`UIF-TOK-002`,
 /// `hoarfrost::widget::button::HORIZONTAL_PADDING`).
 ///

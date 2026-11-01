@@ -300,7 +300,7 @@ pub const LICENSE_MAX_HEIGHT: f32 = 200.0;
 ///
 /// **`_BAND_HEIGHT`, not `_BAND`.** The gate only inspects a constant whose
 /// name reads as a measurement
-/// ([`VISUAL_NAME_MARKERS`](hoarfrost::token_lint::VISUAL_NAME_MARKERS)
+/// (`hoarfrost::token_lint::VISUAL_NAME_MARKERS`
 /// matches `HEIGHT`), so the suffix is what makes these two compositions
 /// auditable at all — the same reason the framework names its cap
 /// `ATTRIBUTIONS_LIST_MAX_HEIGHT` rather than the spec's `_MAX_H`. They
@@ -754,7 +754,7 @@ pub const ABOUT_CLOSE_BUTTON_ID: &str = "about_close";
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a
@@ -876,7 +876,7 @@ fn license_section(view_model: &AboutViewModel) -> Element<'_, Message> {
 /// has left after [`ABOUT_CREDITS_HEADER_BAND_HEIGHT`] and
 /// [`ABOUT_CREDITS_FOOTER_BAND_HEIGHT`] ([`credits_list_height`],
 /// `UIF-MOD-004`), held down by the §2.2
-/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`](hoarfrost::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT)
+/// `hoarfrost::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT`
 /// cap. When the card is too short to have anything left the solver returns
 /// zero and the length falls back to `Fill` rather than `Length::Fixed(0.0)`
 /// — a zero-length child is *void* in iced 0.14 and would silently drop the

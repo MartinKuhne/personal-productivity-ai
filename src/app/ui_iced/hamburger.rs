@@ -30,14 +30,14 @@
 //! (`"✓ Model name"`) for the chat-model and table-wrap choices, so a
 //! single-choice group looked identical to an independent toggle. Here the
 //! chat models and the table-wrap strategies are
-//! [`RowKind::Radio`](hoarfrost::surface::menu::model::RowKind::Radio)
+//! `hoarfrost::surface::menu::model::RowKind::Radio`
 //! members of a named
-//! [`RadioGroupId`](hoarfrost::surface::menu::model::RadioGroupId), and
+//! `hoarfrost::surface::menu::model::RadioGroupId`, and
 //! Background operations / Agent debug are
-//! [`RowKind::Check`](hoarfrost::surface::menu::model::RowKind::Check) rows.
+//! `hoarfrost::surface::menu::model::RowKind::Check` rows.
 //! The leading slot glyph (`•` vs `✓`) is the framework's, and mutual
 //! exclusion is enforced by
-//! [`Menu::activate`](hoarfrost::surface::menu::model::Menu::activate)
+//! `hoarfrost::surface::menu::model::Menu::activate`
 //! instead of by each row's command.
 //!
 //! # The trigger rectangle is synthesised, not measured
@@ -47,7 +47,7 @@
 //! builds the navbar band truncated at the button's right inset. That is
 //! the same approximation the previous synthetic anchor point encoded,
 //! expressed as a real
-//! [`Anchor::Control`](hoarfrost::geometry::anchor::Anchor::Control)
+//! `hoarfrost::geometry::anchor::Anchor::Control`
 //! rectangle so the framework's quadrant-flip and viewport-clamp rules
 //! now apply to it.
 //!
@@ -154,7 +154,7 @@ pub fn hamburger_menu(view_model: &TopBarViewModel) -> Menu {
 
 /// The "Windows" submenu: two independent on/off windows.
 ///
-/// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) for a
+/// `hoarfrost::surface::menu::model::ClosePolicy` for a
 /// [`RowKind::Check`] is `StayOpen`, which is what both of these want —
 /// the user flips one and then the other in a single visit.
 fn windows_menu() -> Menu {
@@ -345,7 +345,7 @@ pub fn root_placement(menu: &Menu, viewport: Size) -> Placement {
 /// hamburger does differently from the context-menu surface.
 ///
 /// These are the rectangles registered with the
-/// [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry), which
+/// `hoarfrost::surface::zorder::SurfaceRegistry`, which
 /// is what makes the hamburger's registered region the card the user
 /// actually sees instead of an empty list.
 ///

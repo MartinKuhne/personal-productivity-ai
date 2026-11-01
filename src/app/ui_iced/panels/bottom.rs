@@ -63,9 +63,9 @@
 //!   snapshot for [`TextInput`]. The
 //!   field routes typing and Escape restoration as
 //!   [`AgentMessage::InputChanged`], Enter's explicit
-//!   [`Committed`](hoarfrost::widget::text_input_controller::TextInputEmission::Committed)
+//!   `hoarfrost::widget::text_input_controller::TextInputEmission::Committed`
 //!   tier as [`AgentMessage::Submit`], and blur's
-//!   [`FocusCommitted`](hoarfrost::widget::text_input_controller::TextInputEmission::FocusCommitted)
+//!   `hoarfrost::widget::text_input_controller::TextInputEmission::FocusCommitted`
 //!   tier as `InputChanged` only. Its paint comes from the framework widget
 //!   and [`Palette::pro`], not a hand-built iced style.
 //!

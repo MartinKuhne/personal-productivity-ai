@@ -273,7 +273,7 @@ fn close_command(card: MovableCard) -> Task<Message> {
 ///
 /// Since INT-3b a row pick no longer arrives here: the row emits
 /// [`MenuMessage::RowPicked`](MenuMessage::RowPicked) and the cascade's own
-/// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) closes the
+/// `hoarfrost::surface::menu::model::ClosePolicy` closes the
 /// tree, so the menu's dismissal is framework-driven. This pre-pass covers the
 /// **other** half of the native-dropdown behaviour — an intent raised from
 /// somewhere else (a keyboard shortcut, a panel button) while a menu happens
@@ -1428,10 +1428,10 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
 /// Openness lives in the surface's own
 /// [`MenuCascade`](MenuCascade), not in a bool the view reads:
 /// [`MenuMessage::Opened`] hands the built
-/// [`Menu`](hoarfrost::surface::menu::model::Menu) to
+/// `hoarfrost::surface::menu::model::Menu` to
 /// [`MenuCascade::open`](MenuCascade::open), a row pick runs
 /// [`MenuCascade::activate_row`](MenuCascade::activate_row), and the row's
-/// own [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) decides
+/// own `hoarfrost::surface::menu::model::ClosePolicy` decides
 /// whether the tree survives — which is why a checkbox keeps the card open
 /// and an action closes it without either behaviour being spelled out here.
 ///
@@ -1611,7 +1611,7 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
 /// then dispatch the intent.
 ///
 /// The intent is read **before** the cascade runs, because a row whose
-/// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) closes the
+/// `hoarfrost::surface::menu::model::ClosePolicy` closes the
 /// tree takes its card — and therefore the key lookup — with it.
 ///
 /// The surface is dropped when the cascade says the tree closed rather than
@@ -1987,7 +1987,7 @@ fn run_recovery(state: &mut AppState, path: &Path, recovery: Recovery) -> Vec<Ta
 ///
 /// Built directly on iced's focusable operation rather than through
 /// [`hoarfrost::bridge::focus_task`], because the bridge projects a
-/// [`FocusState`](hoarfrost::focus::FocusState) model and the editor card
+/// `hoarfrost::focus::FocusState` model and the editor card
 /// registers no focus group (see the `UIF-MOD-001` note in
 /// [`crate::ui_iced::editor`]'s module docs). Naming the widget id is the
 /// honest minimum for "put the caret where the error is".

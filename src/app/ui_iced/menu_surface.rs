@@ -4,9 +4,9 @@
 //! the top-bar hamburger ([the hamburger surface](crate::ui_iced::hamburger)) and the
 //! file-tree / tab [context menu](crate::ui_iced::context_menu) — mount the
 //! same §4.8.1 card around a column of
-//! [`MenuRow`](hoarfrost::surface::menu::view::MenuRow) widgets, and both solve
+//! `hoarfrost::surface::menu::view::MenuRow` widgets, and both solve
 //! the same "one viewport rectangle per open card, root first" walk that the
-//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) is fed.
+//! `hoarfrost::surface::zorder::SurfaceRegistry` is fed.
 //!
 //! Exactly **two** things differ between the two surfaces, and both are
 //! parameters here rather than copies:
@@ -41,7 +41,7 @@ mod tests;
 /// `menu_surface_tests`, `update_tests` and `app_tests`.
 ///
 /// The file carries the `_tests` suffix so
-/// [`token_lint::is_test_file`](hoarfrost::token_lint::is_test_file) treats it
+/// `hoarfrost::token_lint::is_test_file` treats it
 /// as fixture rather than shipped code: it is compiled only under `cfg(test)`
 /// and defines no visual tokens, so counting it as a production file would
 /// inflate the gate's scope without anything to check.
@@ -263,7 +263,7 @@ pub fn positioned<'a>(card: Element<'a, Message>, rect: Rectangle) -> Element<'a
 /// publish [`MenuMessage::RowPicked`] carrying the card path and row index;
 /// the reducer runs
 /// [`MenuCascade::activate_row`] and lets the
-/// row's own [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy)
+/// row's own `hoarfrost::surface::menu::model::ClosePolicy`
 /// decide whether the menu survives the click.
 ///
 /// The row's two hover reports are mapped alongside them onto
@@ -364,7 +364,7 @@ pub fn overlay<'a>(
 /// of anchoring the two menu surfaces do differently.
 ///
 /// These are the rectangles registered with the
-/// [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry), which is
+/// `hoarfrost::surface::zorder::SurfaceRegistry`, which is
 /// what makes a registered menu surface the card the user actually sees rather
 /// than an empty region.
 ///

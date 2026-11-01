@@ -236,7 +236,7 @@ pub const TOOLS_RESIZE_CAPTURE_ID: &str = "tools.resize.capture";
 /// [`PersistedUiState::overlay_geometry`](crate::ui::persisted::PersistedUiState::overlay_geometry).
 ///
 /// The map's keys name the *kind* of surface, the same way
-/// [`movable::storage_key`](hoarfrost::surface::movable::storage_key) names a
+/// `hoarfrost::surface::movable::storage_key` names a
 /// movable one with `movable:`. A centred modal is not movable — it has no
 /// position the user controls — so it does not borrow that prefix.
 pub const MODAL_GEOMETRY_KEY_PREFIX: &str = "modal:";
@@ -1476,7 +1476,7 @@ pub fn action_focus_id(label: &str) -> &'static str {
 /// accessors.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box for the reason [`footer_button`] states: the content can never
 /// measure icon-only.
 fn footer_button_widget(
@@ -1502,7 +1502,7 @@ fn footer_button_widget(
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a

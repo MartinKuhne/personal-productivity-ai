@@ -51,7 +51,7 @@
 //! ## What positioning IS achievable
 //!
 //! * Viewport clamping is no longer this module's job. Every floating card
-//!   here is placed by [`anchor::solve`](hoarfrost::geometry::anchor::solve),
+//!   here is placed by `hoarfrost::geometry::anchor::solve`,
 //!   which resolves the flip (menu cards) or the cursor-proximal clamp and
 //!   `8px` viewport margin (input dialogs) before the card is laid out.
 //!   The hand-rolled `clamp_anchor` this module used to own was retired in
@@ -74,12 +74,12 @@
 //!   the same coordinate space. Individual row/tab triggers only request
 //!   opening; they do not report local coordinates.
 //! * **The built-in `Menu` has no submenu nesting.** FastMD's reusable
-//!   engine ([`MenuCascade`](hoarfrost::surface::menu::cascade::MenuCascade))
+//!   engine (`hoarfrost::surface::menu::cascade::MenuCascade`)
 //!   supplies nested parent/child surfaces without adding `iced_aw`; the
 //!   flat helpers in this module remain intentionally single-level.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
 //!   (`menu.rs:244-270`), but we are not using `Menu`. This module clamps
-//!   nothing at all: [`anchor::solve`](hoarfrost::geometry::anchor::solve)
+//!   nothing at all: `hoarfrost::geometry::anchor::solve`
 //!   mirrors an axis when the preferred side cannot hold the card, and
 //!   `Anchor::CursorProximal` deliberately never flips.
 //!
@@ -763,7 +763,7 @@ where
 /// here.
 ///
 /// `geometry` comes from the card's
-/// [`MovableHost`](hoarfrost::surface::movable::MovableHost) and never from
+/// `hoarfrost::surface::movable::MovableHost` and never from
 /// a locally-computed rectangle, so the painted card and the rectangle the
 /// registry routes pointer events against are the same rectangle.
 #[must_use]

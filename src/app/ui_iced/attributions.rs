@@ -307,9 +307,9 @@ fn header_cell(label: &'static str) -> Element<'static, Message> {
 /// rendered widget, so the cell composes them itself:
 ///
 /// * the resting
-///   [`HyperlinkStyle::foreground`](hoarfrost::widget::hyperlink::HyperlinkStyle::foreground)
+///   `hoarfrost::widget::hyperlink::HyperlinkStyle::foreground`
 ///   (`color.accent.text`) and
-///   [`HyperlinkStyle::underlined`](hoarfrost::widget::hyperlink::HyperlinkStyle::underlined)
+///   `hoarfrost::widget::hyperlink::HyperlinkStyle::underlined`
 ///   drive the label — **not** the
 ///   `accent_fill` colour the cell used before, which measured below the
 ///   4.5:1 floor against this card's surface;

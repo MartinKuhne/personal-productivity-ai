@@ -17,8 +17,8 @@
 //! rule set — redaction, the colour-constructor patterns, the visual-name
 //! markers, the scalar classifier, the registry semantics, the
 //! stale-allow-list check — is hoarfrost's, reached through
-//! [`scan_tree`](hoarfrost::token_lint::scan_tree) with an app-supplied
-//! [`Scope`](hoarfrost::token_lint::Scope). A parallel scanner starts
+//! `hoarfrost::token_lint::scan_tree` with an app-supplied
+//! `hoarfrost::token_lint::Scope`. A parallel scanner starts
 //! identical and then drifts: fix a false negative in one and the other
 //! keeps reporting what it always reported, and two numbers disagreeing
 //! about the same tree is worse than one number wrong in a known way.
@@ -87,7 +87,7 @@ pub const APP_VISUAL_SCOPE_PREFIXES: [&str; 1] = ["ui_iced/"];
 /// App-owned layout bounds registered as fixed literals.
 ///
 /// The app-tree analogue of
-/// [`SURFACE_GEOMETRY_CONSTANTS`](hoarfrost::token_lint::SURFACE_GEOMETRY_CONSTANTS):
+/// `hoarfrost::token_lint::SURFACE_GEOMETRY_CONSTANTS`:
 /// each entry carries the authority for a number no token carries. The
 /// registry is the *only* way a bare literal on a visually-named constant
 /// passes Rule B short of an [`APP_ALLOW_LIST`] entry, and an entry that
@@ -118,7 +118,7 @@ pub const APP_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
 /// Enumerated exceptions to the two rules.
 ///
 /// Every entry carries its own reason, and
-/// [`scan_tree`](hoarfrost::token_lint::scan_tree) reports any entry that
+/// `hoarfrost::token_lint::scan_tree` reports any entry that
 /// suppresses nothing, so this list cannot quietly grow stale as the tree
 /// moves under it.
 ///

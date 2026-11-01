@@ -1378,7 +1378,7 @@ fn field_caption(parts: form_field::CaptionParts<'_>) -> Element<'static, Messag
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// `hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH`
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a

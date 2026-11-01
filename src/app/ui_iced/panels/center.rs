@@ -153,10 +153,10 @@
 //! is blocked by something that does exist:
 //!
 //! * **The 2 px top accent indicator is built** (INT-11). A `Stack` per tab
-//!   with a [`shape::BORDER_FOCUS`]-high styled `container` laid over it is
-//!   the whole mechanism; the bar consumes no layout, so the pinned band
-//!   closure below is untouched by it. What is *still* missing is the
-//!   indicator's third state: §4.4.2 asks for `border.strong` on a hovered
+//!   with a `hoarfrost::token::shape::BORDER_FOCUS`-high styled `container`
+//!   laid over it is the whole mechanism; the bar consumes no layout, so the
+//!   pinned band closure below is untouched by it. What is *still* missing is
+//!   the indicator's third state: §4.4.2 asks for `border.strong` on a hovered
 //!   inactive tab, which needs the strip to report hover into the reducer
 //!   the way the file tree does since INT-10. The active-only bar is what
 //!   ships, and an inactive tab paints nothing rather than a leftover bar.
@@ -166,8 +166,6 @@
 //!   `rule::horizontal` sibling inside the band, which pushes the band's
 //!   content box past the 36 px [`STRIP_HEIGHT`] pins. Left as a stated
 //!   follow-on rather than folded in here.
-//!
-//! [`shape::BORDER_FOCUS`]: hoarfrost::token::shape::BORDER_FOCUS
 //!
 //! One further §4.4.2 deviation is recorded rather than changed: the spec
 //! gives the **active tab** a `surface.overlay` fill, while the app paints

@@ -69,13 +69,13 @@ pub struct PersistedUiState {
     ///
     /// Keyed by the surface's kind and id: `movable:<surface-id>` for a movable
     /// card (see
-    /// [`movable::storage_key`](hoarfrost::surface::movable::storage_key)) and
+    /// `hoarfrost::surface::movable::storage_key`) and
     /// `modal:<surface-id>` for a centred modal (see
     /// [`MODAL_GEOMETRY_KEY_PREFIX`](crate::ui_iced::tools_dialog::MODAL_GEOMETRY_KEY_PREFIX)).
     /// The prefix names the kind because the two kinds remember different things:
     /// a movable card remembers where it is, a centred modal only how big it is.
     /// Each holds that crate's canonical `x,y,width,height` text form
-    /// ([`MovableGeometry::encode`](hoarfrost::surface::movable::MovableGeometry::encode)).
+    /// (`hoarfrost::surface::movable::MovableGeometry::encode`).
     ///
     /// Stored as the framework's own encoded string rather than four loose
     /// numbers so this model does not re-derive a format the framework

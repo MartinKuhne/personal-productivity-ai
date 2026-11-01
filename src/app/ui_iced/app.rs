@@ -362,7 +362,7 @@ impl AppState {
 /// The rows themselves are owned by the cascade, which clones the model on
 /// open. What this struct keeps beside it is the **routing table** from a row's
 /// key to the self-contained [`Message`] that row publishes ([FMD-068]),
-/// because a framework [`Row`](hoarfrost::surface::menu::model::Row) carries
+/// because a framework `hoarfrost::surface::menu::model::Row` carries
 /// structure and not intent. Both views are derived from the same
 /// [`ContextRow`] list, so they cannot disagree.
 #[derive(Clone, Debug)]
@@ -434,7 +434,7 @@ impl ContextMenu {
     /// when the card or row is unknown or the row carries no intent.
     ///
     /// Read **before** the row is activated: a row whose
-    /// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) closes
+    /// `hoarfrost::surface::menu::model::ClosePolicy` closes
     /// the tree takes its card with it, so looking the key up afterwards would
     /// find nothing.
     #[must_use]
@@ -636,14 +636,14 @@ pub struct OverlayState {
     ///
     /// # Why this exists now, and why it is scoped to the menu
     ///
-    /// [`MenuCascade::on_key`](hoarfrost::surface::menu::cascade::MenuCascade::on_key)
+    /// `hoarfrost::surface::menu::cascade::MenuCascade::on_key`
     /// takes `&mut FocusState`: the cascade cannot rove a keyboard it has
     /// no member list for. Adopting the framework menu engine therefore
     /// forces this state into the app whether or not anyone reads it yet.
     ///
     /// It is scoped to **one surface** — the menu's own focusable rows,
     /// registered by the cascade as one
-    /// [`FocusGroup`](hoarfrost::focus::FocusGroup) per open card, with a
+    /// `hoarfrost::focus::FocusGroup` per open card, with a
     /// focus trap pushed on open and popped on close. That is the
     /// condition the INT-2 deferral note at the top of this module asked
     /// for: the member set is not fiction, because the framework itself
@@ -660,10 +660,10 @@ pub struct OverlayState {
     /// the note's stated exit condition, arriving one surface at a time.
     ///
     /// Projected onto iced's router through
-    /// [`bridge::focus_task`](hoarfrost::bridge::focus_task) after every
+    /// `hoarfrost::bridge::focus_task` after every
     /// cascade transition. `Tab` is not routed by the app; the trap keeps
     /// it inside the card once a host hands `Tab` to
-    /// [`bridge::tab_task`](hoarfrost::bridge::tab_task), which the app
+    /// `hoarfrost::bridge::tab_task`, which the app
     /// still does not do.
     pub menu_focus: FocusState,
     /// Solved viewport rectangles of every open hamburger card, root
@@ -995,7 +995,7 @@ fn sync_one_movable_host(
 ///
 /// **INT-6 must replace the body** with a dispatch to the capturing
 /// control's own
-/// [`GestureSlot::cancel`](hoarfrost::binding::snapshot::GestureSlot::cancel),
+/// `hoarfrost::binding::snapshot::GestureSlot::cancel`,
 /// keyed on [`DragCapture::id`]. Until it does, the Pre-Rank step is a
 /// clean pass-through, which
 /// `test_close_topmost_pre_rank_is_a_clean_pass_through_with_no_capture`
@@ -1045,7 +1045,7 @@ impl OverlayState {
     /// [`refresh_context_rects`](AppState::refresh_context_rects)), one
     /// region per open card. That closes the INT-2 review area for both menu
     /// surfaces: `route_pointer` now answers
-    /// [`PointerTarget::Surface`](hoarfrost::surface::zorder::PointerTarget::Surface)
+    /// `hoarfrost::surface::zorder::PointerTarget::Surface`
     /// for a point inside either menu card.
     ///
     /// Every **other** surface is still registered with an empty region
@@ -1175,7 +1175,7 @@ impl OverlayState {
     /// One `Esc` dismisses exactly one surface, walking the derived
     /// [`SurfaceRegistry`] through
     /// [`escape_with_pre_rank`] in `UIF-WIN-003` order: the Pre-Rank drag
-    /// ledger first, then by descending [`ZBand::escape_rank`](hoarfrost::surface::zorder::ZBand::escape_rank)
+    /// ledger first, then by descending `hoarfrost::surface::zorder::ZBand::escape_rank`
     /// — and within a rank, the top of the band first.
     ///
     /// `Menu` is rank **3**, `Modal` rank **2**, `UtilityOverlay` rank

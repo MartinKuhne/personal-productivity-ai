@@ -1085,7 +1085,7 @@ pub enum AgentDebugMessage {
 /// `ToggleChanged`, `SubmenuOpened`/`SubmenuClosed` and the
 /// context-submenu pair) are **gone**. Each one modelled a transition the
 /// app-side menu engine had to be told about by hand; the
-/// [`MenuCascade`](hoarfrost::surface::menu::cascade::MenuCascade) now owns
+/// `hoarfrost::surface::menu::cascade::MenuCascade` now owns
 /// submenu depth, checked state and close behaviour, so there is nothing
 /// left for the view to report. The pointer variants above are **not** a
 /// return of that pattern: they report where the cursor is, never what
@@ -1100,11 +1100,11 @@ pub enum MenuMessage {
     /// A row of a framework-driven menu tree was activated.
     ///
     /// Carries the **address**, not the intent: the reducer runs
-    /// [`MenuCascade::activate_row`](hoarfrost::surface::menu::cascade::MenuCascade::activate_row)
+    /// `hoarfrost::surface::menu::cascade::MenuCascade::activate_row`
     /// on it and reads the resulting
-    /// [`ActivationEffect`](hoarfrost::surface::menu::model::ActivationEffect)
+    /// `hoarfrost::surface::menu::model::ActivationEffect`
     /// to learn both the command and whether the row's
-    /// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) keeps
+    /// `hoarfrost::surface::menu::model::ClosePolicy` keeps
     /// the menu open. A checkable row therefore does **not** close the
     /// card, which is the behaviour the previous
     /// address-and-close path could not express.
@@ -1146,7 +1146,7 @@ pub enum MenuMessage {
     /// **Advisory, and never a dismissal.** Dismissing a menu belongs to
     /// the click-away blocker that
     /// [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay)
-    /// mounts, and [`MenuCascade::pointer_left_card`](hoarfrost::surface::menu::cascade::MenuCascade::pointer_left_card)
+    /// mounts, and `hoarfrost::surface::menu::cascade::MenuCascade::pointer_left_card`
     /// says why in its own words: a corridor that closed surfaces on its
     /// own would give one menu two owners. The reducer relaxes the aim
     /// guard on this and touches nothing else, so sweeping the cursor
@@ -1159,9 +1159,9 @@ pub enum MenuMessage {
     ///
     /// The corridor is time-based and iced is event-driven. With the
     /// pointer sitting still on a sibling row no further event arrives,
-    /// so a [`Hold`](hoarfrost::surface::menu::aim::AimDecision::Hold)
+    /// so a `hoarfrost::surface::menu::aim::AimDecision::Hold`
     /// would never mature into a
-    /// [`Switch`](hoarfrost::surface::menu::aim::AimDecision::Switch)
+    /// `hoarfrost::surface::menu::aim::AimDecision::Switch`
     /// and the branch would only change when the user jiggled the mouse.
     /// The reducer therefore schedules this message for exactly the
     /// milliseconds the corridor has left and re-runs the decision when
