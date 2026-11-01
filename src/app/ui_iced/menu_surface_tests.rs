@@ -12,6 +12,7 @@ use crate::ui_iced::menu_surface::log_capture::{Capture, with_capture};
 use hoarfrost::focus::FocusState;
 use hoarfrost::surface::menu::cascade::{MenuCascade, MenuTreeKind};
 use hoarfrost::surface::menu::model::{MenuId, Row, submenu_id};
+use hoarfrost::test_helpers::screenshot;
 
 /// A root menu holding `keys` as plain action rows.
 fn menu_with(keys: &[&str]) -> Menu {
@@ -185,50 +186,6 @@ const PIXEL_SCALE: f32 = 2.0;
 /// background never reads as a glyph.
 const INK_THRESHOLD: u32 = 90;
 
-/// Draw `element` once, headless, and return the RGBA framebuffer.
-///
-/// Re-implemented here rather than shared from `hoarfrost::test_helpers`
-/// because that module is `#[cfg(test)]` to its own crate and cannot be
-/// reached from this one. Deliberately minimal: one draw, one screenshot.
-fn shoot(size: Size, element: Element<'static, Message>) -> Vec<u8> {
-    use iced::advanced::renderer::Headless as _;
-    use iced_test::futures::futures::executor::block_on;
-    use iced_test::renderer::Renderer;
-    use iced_test::runtime::user_interface::{self, UserInterface};
-
-    let mut renderer = block_on(<Renderer as iced::advanced::renderer::Headless>::new(
-        iced::Font::with_name("Fira Sans"),
-        iced::Pixels(16.0),
-        None,
-    ))
-    .expect("a headless renderer should be available for menu card tests");
-
-    let mut ui: UserInterface<'static, Message, iced::Theme, Renderer> = UserInterface::build(
-        element,
-        size,
-        user_interface::Cache::default(),
-        &mut renderer,
-    );
-
-    ui.draw(
-        &mut renderer,
-        &iced::Theme::Dark,
-        &iced::advanced::renderer::Style {
-            text_color: iced::Color::WHITE,
-        },
-        iced::mouse::Cursor::Unavailable,
-    );
-
-    renderer.screenshot(
-        Size::new(
-            (size.width * PIXEL_SCALE).round() as u32,
-            (size.height * PIXEL_SCALE).round() as u32,
-        ),
-        PIXEL_SCALE,
-        iced::Color::BLACK,
-    )
-}
-
 /// The vertical band of ink inside the logical rectangle `(x0,y0)..(x1,y1)`,
 /// in logical pixels, or `None` when that region carries none.
 ///
@@ -288,7 +245,7 @@ fn test_the_app_menu_card_paints_every_row_inside_its_own_rect() {
     let rect = Rectangle::new(Point::ORIGIN, size);
     let element: Element<'static, Message> = card_element(card, &cascade, rect);
 
-    let rgba = shoot(size, element);
+    let rgba = screenshot(size, PIXEL_SCALE, iced::Color::BLACK, element);
     let width = (size.width * PIXEL_SCALE).round() as u32;
 
     for row in 0..3 {
