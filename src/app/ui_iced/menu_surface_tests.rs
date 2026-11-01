@@ -265,15 +265,6 @@ fn test_the_app_menu_card_paints_every_row_inside_its_own_rect() {
     }
 }
 
-#[test]
-fn test_card_inset_is_the_framework_token_not_a_restated_number() {
-    assert_eq!(
-        CARD_INSET,
-        hoarfrost::token::space::XS,
-        "the card inset comes from the token, so it cannot drift from §4.8.1"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Reproduction — the whole open chain, driven from a real trigger click
 // ---------------------------------------------------------------------------

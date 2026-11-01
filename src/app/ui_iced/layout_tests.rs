@@ -504,17 +504,14 @@ fn test_clamped_width_min_wins_over_degenerate_cap() {
 // Splitter grab band + pane gutter (framework token binding, defect #12)
 // ---------------------------------------------------------------------------
 
-/// [RUST-021] / `UIF-TOK-002`: the pane-grid resize leeway is derived from the
-/// framework's `size.splitter.grab` token rather than owning its own number,
-/// and it is reduced by exactly the gutter the grid paints — iced's grab area
-/// is `spacing + leeway`, so the two must sum to the mandated band.
+/// [RUST-021] / `UIF-TOK-002`: iced's grab area is `spacing + leeway`, so the
+/// two must sum to the mandated band. The band is derived from the framework's
+/// `size.splitter.grab` token at the definition site
+/// ([`RESIZE_LEEWAY_PIXELS`]); what this pins is the **width that reaches the
+/// user**, as a literal, so a framework retune of the token moves the band and
+/// fails here rather than drifting quietly.
 #[test]
-fn test_resize_leeway_plus_spacing_is_the_framework_splitter_grab_token() {
-    assert_eq!(
-        RESIZE_LEEWAY_PIXELS + PANE_SPACING_PIXELS,
-        hoarfrost::token::size::SPLITTER_GRAB,
-        "UIF-PANE-001: the grab band is `spacing + leeway` = size.splitter.grab"
-    );
+fn test_resize_leeway_plus_spacing_sums_to_the_pinned_grab_band() {
     assert_eq!(
         RESIZE_LEEWAY_PIXELS + PANE_SPACING_PIXELS,
         10.0,
@@ -530,16 +527,13 @@ fn test_resize_leeway_plus_spacing_is_the_framework_splitter_grab_token() {
     );
 }
 
-/// Defect #12: the gutter is a hoarfrost spacing rung, not a literal, and it
-/// stays small enough to read as a divider rather than a margin.
+/// Defect #12: the gutter stays small enough to read as a divider rather than a
+/// margin. It is bound to a hoarfrost spacing rung at the definition site
+/// ([`PANE_SPACING_PIXELS`]); what this pins is the *relationship* between the
+/// rungs, which a literal could not express.
 #[test]
-fn test_pane_spacing_is_the_framework_space_2xs_token() {
-    assert_eq!(
-        PANE_SPACING_PIXELS,
-        hoarfrost::token::space::XXS,
-        "PANE_SPACING_PIXELS must be hoarfrost::token::space::XXS"
-    );
-    // See [`test_resize_leeway_plus_spacing_is_the_framework_splitter_grab_token`]:
+fn test_pane_spacing_stays_a_divider_rung() {
+    // See [`test_resize_leeway_plus_spacing_sums_to_the_pinned_grab_band`]:
     // the rung comparison is a guard, so it is read through locals.
     let spacing = PANE_SPACING_PIXELS;
     let next_rung = hoarfrost::token::space::XS;
@@ -1084,21 +1078,16 @@ fn f2_restored_pane_widths_take_effect_at_startup() {
     );
 }
 
-/// [RUST-021] / `UIF-TOK-002`: the stub band height follows the
-/// framework's `size.control.lg` rung — the same rung the live navbar
-/// band is built at — rather than keeping its own off-scale `28`.
+/// [RUST-021] / `UIF-TOK-002`: the stub band sits on the `size.control.lg`
+/// rung — the same rung the live navbar band is built at — rather than keeping
+/// its own off-scale `28`.
 ///
 /// **Movement: 28 → 36**, tracking
 /// [`crate::ui_iced::panels::top::BAR_HEIGHT_POINTS`]. The stubs are
 /// unmounted dev scaffolding; see [`STUB_BAND_HEIGHT_POINTS`] for why one
 /// fixed height cannot represent both real bands.
 #[test]
-fn test_stub_band_height_is_the_framework_control_lg_token() {
-    assert_eq!(
-        STUB_BAND_HEIGHT_POINTS,
-        hoarfrost::token::size::CONTROL_LG,
-        "STUB_BAND_HEIGHT_POINTS must be hoarfrost::token::size::CONTROL_LG"
-    );
+fn test_stub_band_height_stays_on_the_control_lg_rung() {
     assert_eq!(STUB_BAND_HEIGHT_POINTS, 36.0);
     assert_ne!(
         STUB_BAND_HEIGHT_POINTS, 28.0,

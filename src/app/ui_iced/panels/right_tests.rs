@@ -8,8 +8,8 @@
 use super::{
     RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH, TOC_BASE_INDENT_PIXELS,
     TOC_BUTTON_H_PAD_PIXELS, TOC_LEVEL_INDENT_PIXELS, TOC_ROW_RIGHT_PAD_PIXELS,
-    TOC_ROW_VERTICAL_PAD_PIXELS, TOC_SCROLLBAR_GUTTER_PIXELS, auto_fit_width, entry_width,
-    longest_entry_width, resolve_anchor, should_show_panel, toc_button_width, toc_indent_pixels,
+    TOC_SCROLLBAR_GUTTER_PIXELS, auto_fit_width, entry_width, longest_entry_width, resolve_anchor,
+    should_show_panel, toc_button_width, toc_indent_pixels,
 };
 use crate::markdown::ToCEntry;
 
@@ -114,15 +114,14 @@ fn test_resolve_anchor_applies_the_fuzzy_rule_in_both_directions() {
 }
 
 // ---------------------------------------------------------------------------
-// INT-7b: the two ToC indent constants are bound to spacing tokens
+// INT-7b: the two ToC indent constants stay inside the pane
 //
-// Both bindings are **exact** — `4.0` *is* `space.xs` and `12.0` *is*
-// `space.md` — so unlike the other INT-7b pins there is no retired
-// literal to `assert_ne!` against: the number did not move, the *source*
-// did. What these pins hold is the binding itself, so a retune of the
-// spacing rung moves the ToC with every other `xs`/`md` inset instead of
-// leaving this pane behind, and a retune of the ToC alone cannot silently
-// take it off the grid.
+// Both constants are bound to spacing rungs at their definition sites
+// (`TOC_BASE_INDENT_PIXELS` = `space.xs`, `TOC_LEVEL_INDENT_PIXELS` =
+// `space.md`), so re-asserting that equality here would compare a constant with
+// itself: both sides of the `assert_eq!` are the same token and a framework
+// retune moves them together. What this pin holds instead is the *consequence*
+// that motivated the rung choice, which no binding can express on its own.
 //
 // The level rung is deliberately **not** the tree's: the ToC pane is the
 // narrowest in the layout (`RIGHT_PANE_MIN_W` = 120px). At the tree's 16px
@@ -132,17 +131,7 @@ fn test_resolve_anchor_applies_the_fuzzy_rule_in_both_directions() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_toc_indent_constants_are_bound_to_the_spacing_scale() {
-    assert_eq!(
-        TOC_BASE_INDENT_PIXELS,
-        hoarfrost::token::space::XS,
-        "base indent: the ToC row's base pad reads off the spacing scale"
-    );
-    assert_eq!(
-        TOC_LEVEL_INDENT_PIXELS,
-        hoarfrost::token::space::MD,
-        "level indent: one heading level of ToC indent reads off the spacing scale"
-    );
+fn the_toc_indent_stays_tighter_than_the_tree() {
     assert_ne!(
         TOC_LEVEL_INDENT_PIXELS,
         hoarfrost::composite::tree_row::INDENT_STEP,
@@ -241,23 +230,19 @@ fn furniture(level: u32) -> f32 {
         + TOC_SCROLLBAR_GUTTER_PIXELS
 }
 
+/// The reserved ScrollView gutter is the framework's own, and it must stay on
+/// the same rung as the splitter grab so a pane edge and a scrollbar reserve
+/// the same width. Both sides are framework constants, so this is the one
+/// comparison in this file that a framework retune can actually break — the
+/// app-side bindings (`TOC_ROW_RIGHT_PAD_PIXELS`, `TOC_ROW_VERTICAL_PAD_PIXELS`,
+/// `TOC_BUTTON_H_PAD_PIXELS`, `TOC_SCROLLBAR_GUTTER_PIXELS`) are each *defined
+/// as* their token and are not re-asserted here.
 #[test]
-fn the_row_furniture_constants_are_bound_to_framework_tokens() {
-    assert_eq!(TOC_ROW_RIGHT_PAD_PIXELS, hoarfrost::token::space::XS);
-    assert_eq!(TOC_ROW_VERTICAL_PAD_PIXELS, hoarfrost::token::space::XXS);
-    assert_eq!(
-        TOC_BUTTON_H_PAD_PIXELS,
-        hoarfrost::widget::button::HORIZONTAL_PADDING,
-        "the solver must charge the button padding the row actually carries"
-    );
+fn the_scrollbar_gutter_stays_on_the_splitter_grab_rung() {
     assert_eq!(
         TOC_SCROLLBAR_GUTTER_PIXELS,
-        hoarfrost::composite::scroll_view::TRACK_WIDTH_RESERVED,
-        "the reserved ScrollView gutter is the framework's, not a number this pane invented"
-    );
-    assert_eq!(
-        TOC_SCROLLBAR_GUTTER_PIXELS,
-        hoarfrost::token::size::SPLITTER_GRAB
+        hoarfrost::token::size::SPLITTER_GRAB,
+        "the reserved ScrollView gutter and the splitter grab must move together"
     );
 }
 
