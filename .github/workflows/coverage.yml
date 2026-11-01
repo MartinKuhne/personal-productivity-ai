@@ -28,15 +28,12 @@ jobs:
         run: cargo install cargo-llvm-cov --locked --version ^0.8
       - name: Run coverage (llvm-cov)
         run: |
-          # Product-code scope. Dev/demo/lint harnesses are tooling rather than shipped
-          # behaviour: the widget gallery, the geometry/pixel probes, the token and
-          # invariant lint gates, the mock JMAP server and the test harnesses. Counting
-          # them would let scaffolding move the gate in either direction.
+          # Product-code scope. Dev/lint harnesses are tooling rather than shipped
+          # behaviour: the token lint gate, the mock JMAP server and the test harnesses.
+          # Counting them would let scaffolding move the gate in either direction.
           IGNORE='src/app/main\.rs|src/app/bin/.*|src/agent/target/.*|tests/.*|benches/.*'
           IGNORE="$IGNORE|src/agent/lib/mcp/oauth/test_support\.rs|src/agent/tools/jmap/mock_server\.rs"
           IGNORE="$IGNORE|src/app/ui_iced/(test_helpers|token_lint_gate)(\.rs|_tests\.rs)"
-          IGNORE="$IGNORE|src/hoarfrost/bin/.*"
-          IGNORE="$IGNORE|src/hoarfrost/(gallery[^/]*|geometry_gallery|checkbox_ink_probe|token_lint|invariant_gate|spec_coverage|test_helpers)(\.rs|_tests\.rs)"
           cargo llvm-cov --workspace --all-features --summary-only \
             --ignore-filename-regex "$IGNORE" \
             2>&1 | tee cov-summary.txt
