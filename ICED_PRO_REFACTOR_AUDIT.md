@@ -1,5 +1,7 @@
 # Hoarfrost Refactor Audit — Remaining `iced::widget::` Usage
 
+> **Note (2026-11-01):** the `src/hoarfrost/...` paths in this record refer to the pre-externalisation tree; the framework is now an external crate — see [hoarfrost-external-crate-plan.md](doc/planning/hoarfrost-external-crate-plan.md).
+
 **Date**: 2026-10-28 (Re-audited)  
 **Status**: Button and RadioGroup migrations complete; Checkbox partially migrated (Logs pending); ComboBox blocked by framework in-flow layout; Tooltips partially wired; SearchBox/Hyperlink available in Hoarfrost but bypassed in app  
 **Purpose**: Authoritative audit of Hoarfrost adoption by FastMD (`src/app`), cataloging migrated controls, remaining native usages, framework blockers, and architectural non-fits
@@ -140,7 +142,7 @@ All native `iced::widget::button` instances have been replaced by `hoarfrost::wi
 3. **Adopt `Hyperlink` widget** in `src/app/ui_iced/attributions.rs:360`, replacing the manual container + mouse area.
 4. **Remove dead `tab_close_style`** in `src/app/ui_iced/panels/center.rs:988`.
 
-### Framework Enhancements Required in `src/hoarfrost`
+### Framework Enhancements Required in the upstream `MartinKuhne/hoarfrost` repo
 1. **Overlay ComboBox:** Refactor `hoarfrost::widget::combo_box` or build an overlay container so the flyout floats in an overlay layer rather than expanding in-flow.
 2. **TabStrip Fixes:** Allow dynamic hover input (`is_hovered`) in `tab_strip.rs`, support pointer-anchored context menus, and update icon styling to match FastMD's 36px token contracts.
 

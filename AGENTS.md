@@ -49,6 +49,7 @@
 
 ## Spec traceability
 - [RUST-040] Every user-facing behaviour maps to a requirement in `SPEC.md`. When adding or changing a feature, You SHOULD cite `REQ-xxx` in `//!`/`///` comments when making changes to the code.
+- The `UIF-*` ids cited throughout `src/app` (hundreds of citations across roughly fifty distinct ids) are specified **upstream**, not here: the authority is [`src/hoarfrost/spec.md`](https://github.com/MartinKuhne/hoarfrost/blob/main/src/hoarfrost/spec.md) in <https://github.com/MartinKuhne/hoarfrost>. `RUST-043` covers it too — you MUST NOT edit it from this repo.
 - [RUST-041] You MUST point out any drift between implemented behaviour and code.
 - [RUST-042] Requirements MUST be high level, goal oriented and user facing. Avoid leaking implementation specifics.
 - `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; You MUST update it when module boundaries or contracts change.
@@ -86,11 +87,34 @@ Before marking any task as complete, run the following from `/` and ensure they 
 | [`src/app`](src/app/AGENTS.md) | Main user facing application                |
 | [`src/agent`](src/agent/AGENTS.md) | Core agent engine, LLM client, tools & protocol clients |
 | [`src/agent/tools`](src/agent/tools/AGENTS.md) | Tool trait, registry and tool families |
-| [`src/hoarfrost`](src/hoarfrost/AGENTS.md) | UI widget library and design tokens |
 | [`src/app/integrations`](src/app/integrations/AGENTS.md) | Application external service integrations |
 | [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
 | [`test/wiki/AGENTS.md`](test/wiki/AGENTS.md)                   | Test wiki fixtures.                                                                   |
+
+### External framework: `hoarfrost`
+
+The UI widget library and design-token source (`hoarfrost`) is **not** in this repo. It is an
+external git dependency pinned by `rev` in the root `Cargo.toml`
+(`hoarfrost = { git = "https://github.com/MartinKuhne/hoarfrost", rev = "dd7af16…" }`).
+
+- You MUST treat its spec (the `UIF-*` requirement IDs in upstream `src/hoarfrost/spec.md`) and its
+  test suite as living upstream at <https://github.com/MartinKuhne/hoarfrost>. `cargo nextest run
+  --workspace` here does NOT run them, and `cargo clippy --workspace` does not lint them — the
+  framework's own CI is the only place its gates run.
+- You MUST bump the framework by editing that `rev` to the new upstream commit SHA, and the bump
+  commit message MUST name what moved (old → new SHA, upstream PR/commit subject), because a `rev`
+  carries no readable version. `cargo update` will NOT move a `rev`-pinned git dependency on its own.
+- When you work on the framework itself you MUST use the two-repo loop: clone it alongside this repo
+  (`git clone https://github.com/MartinKuhne/hoarfrost ../hoarfrost`), then add a
+  `[patch."https://github.com/MartinKuhne/hoarfrost"]` block with
+  `hoarfrost = { path = "../hoarfrost/src/hoarfrost" }` to the root `Cargo.toml` — **locally and
+  uncommitted**, never committed. This is verified to work.
+- You MUST NOT use the `--config` command-line equivalent of that patch: under PowerShell the inner
+  quotes are stripped before cargo sees the argument. Use the manifest block above, or a user-level
+  `paths = [...]` override in `%USERPROFILE%\.cargo\config.toml`.
+- Until the `rev` is bumped, `cargo nextest run --workspace` in this repo tests the *pinned*
+  framework, not your working copy. You MUST say so in the PR body of any cross-repo change.
 
 ### Observabsility
 

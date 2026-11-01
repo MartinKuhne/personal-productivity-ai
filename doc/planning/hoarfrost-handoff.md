@@ -1,5 +1,7 @@
 # hoarfrost — D-2 Boundary Review Hand-off (Composite Widget-Binding Pass)
 
+> **Note (2026-11-01):** the `src/hoarfrost/...` paths in this record refer to the pre-externalisation tree; the framework is now an external crate — see [hoarfrost-external-crate-plan.md](hoarfrost-external-crate-plan.md).
+
 *(Formerly `iced-pro`; renamed to `hoarfrost`)*
 
 > **Status:** Hand-off — verified work queue for the next coding agent.

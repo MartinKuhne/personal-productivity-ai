@@ -1,5 +1,7 @@
 # hoarfrost — Implementation Task Ledger
 
+> **Note (2026-11-01):** the `src/hoarfrost/...` paths in this record refer to the pre-externalisation tree; the framework is now an external crate — see [hoarfrost-external-crate-plan.md](hoarfrost-external-crate-plan.md).
+
 *(Formerly `iced-pro`; renamed to `hoarfrost`)*
 
 > **Status:** In progress — increment ledger for implementing

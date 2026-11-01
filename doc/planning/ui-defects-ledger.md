@@ -1,5 +1,7 @@
 # UI Defect Ledger — 18 reported defects (branch `more-iced`)
 
+> **Note (2026-11-01):** the `src/hoarfrost/...` paths in this record refer to the pre-externalisation tree; the framework is now an external crate — see [hoarfrost-external-crate-plan.md](hoarfrost-external-crate-plan.md).
+
 > **Status:** **Complete — 18 of 18 landed.** Five defects were closed on this
 > branch (`#2`, `#4`, `#6`, `#12`, `#14`, `#17`); the rest landed before the
 > ledger opened. Six follow-ups are recorded in §3, of which **F-4 needs an

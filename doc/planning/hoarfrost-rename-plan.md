@@ -1,5 +1,7 @@
 # Rename Plan: `iced-pro` Crate → `hoarfrost`
 
+> **Note (2026-11-01):** the `src/hoarfrost/...` paths in this record refer to the pre-externalisation tree; the framework is now an external crate — see [hoarfrost-external-crate-plan.md](hoarfrost-external-crate-plan.md).
+
 > **Status:** Plan — target agreed, **not yet executed**. No source files were
 > changed to produce this document; every figure below was read from the tree.
 > **Date:** 2026-10-26

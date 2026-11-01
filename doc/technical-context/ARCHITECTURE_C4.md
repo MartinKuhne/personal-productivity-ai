@@ -65,7 +65,7 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
-  Container(hoarfrost, "hoarfrost", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
+  Container_Ext(hoarfrost, "hoarfrost (external crate)", "External git dependency, NOT a workspace member: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
@@ -82,11 +82,17 @@ C4Container
   Rel(ws, bus, "consumes separate file and directory event buses")
 ```
 
-There are three crates in this workspace that matter to the picture above:
-`fastmd` (the application, `src/app/`), `fastmd-agent` (the agent engine,
-`src/agent/`) and `hoarfrost` (`src/hoarfrost/`). The first two are wired
-together — `AppOrchestrator` submits prompts to and observes events from
-`fastmd-agent`.
+There are two crates in this workspace that matter to the picture above:
+`fastmd` (the application, `src/app/`) and `fastmd-agent` (the agent engine,
+`src/agent/`). They are wired together — `AppOrchestrator` submits prompts to
+and observes events from `fastmd-agent`.
+
+`hoarfrost` is **not** a third workspace crate. It is an external library
+dependency, fetched from <https://github.com/MartinKuhne/hoarfrost> and pinned by
+`rev` in the root `Cargo.toml` (commit `dd7af16`, upstream date 2026-10-31
+(UTC 2026-11-01)), so
+cargo builds it as a dependency of `fastmd` and never as a member of this
+workspace. See *External Container — `hoarfrost`* further down.
 
 `hoarfrost` is consumed by the application in two distinct ways, and the
 distinction is the one thing a reader should carry away from this section.
@@ -134,13 +140,14 @@ stays strictly one-way.
 
 **Still not consumed:** `ModalHost` and `InputDialogHost` (the app takes
 their frame, sizing and error semantics but keeps dismiss ownership — see
-*The ownership contract* under the `hoarfrost` component diagram);
+*The integration contract (INT-3 .. INT-8)* in the *External Container —
+`hoarfrost`* section below);
 `bridge::tab_task`, so framework-driven `Tab` traversal is not wired;
 and the framework's `composite::search_input`, which does not exist. The
 six FastMD document/log content tokens stay app-owned literals under
 decision **D-2**. Porting what remains is the follow-on work decision
-**D-8** describes. See the `hoarfrost` component diagram further down for
-what that crate contains, what it deliberately does not own, and where
+**D-8** describes. See that section further down for what the dependency
+provides, what it deliberately does not own, and where
 the seams between the two still leak.
 
 ## Optional Vector Search
@@ -186,20 +193,31 @@ follow-the-stream scroll rule — live in `ui_iced/overlay.rs` and
 of hand-rolling the widget tree. Since INT-3..INT-8 the *geometry, frame
 and band semantics* behind those idioms come from `hoarfrost` rather than
 from local arithmetic, while open/close/dismiss ownership stays with
-`OverlayState` — see *The integration contract* under the `hoarfrost`
-component diagram.
+`OverlayState` — see *The integration contract (INT-3 .. INT-8)* in the
+*External Container — `hoarfrost`* section below.
+
+`hoarfrost` is deliberately **not** a node in this diagram: it is an external
+container (see *Container Diagram (Level 2)*) and every node here maps to a real
+directory or module under `src/app/`. Which framework subsystem each module
+renders through is named in the node labels and in the integration table above.
+`token_lint_gate` is the one node that is a **checker rather than a runtime
+participant**: its single edge records what it reads, not what it calls —
+`scan_app()` runs hoarfrost's scanner over the app sources (`src/app`) with Rule
+B scoped to `ui_iced/`, i.e. every module in this diagram, and Rule A naming
+`ui/theme.rs` as the crate's only colour-definition file. It is driven by its
+`#[cfg(test)]` sidecar `token_lint_gate_tests`, never by the running app.
 
 ```mermaid
 C4Component
   title FastMD — UI Layer (ui_iced)
 
-  Component(app, "app", "AppState (thin wrapper over FastMdApp) + ViewModels + OverlayState; boot/boot_with_persisted (build_state performs the synchronous DEC-009 ConfigArrived publish), window_settings, launch() builder chain")
+  Component(app, "app", "AppState (thin wrapper over FastMdApp) + ViewModels + OverlayState (hoarfrost SurfaceRegistry + FocusState, derived index only); boot/boot_with_persisted (build_state performs the synchronous DEC-009 ConfigArrived publish), window_settings, launch() builder chain")
   Component(update, "update", "Top-level reducer: window close/save, pane resize, Message::Command publish-and-execute, Inbound bus reductions, finish_frame tail + view-model rebuild")
   Component(view, "view", "Three-band layout with the real panels mounted, under the overlay host (z-ordered floating windows)")
   Component(sub, "subscription", "Inbound Subscription<Message> lanes: ConfigArrived, FileChanged, DirectoryChanged, AgentEvent, BackgroundEvent (pure bus_event_to_message mapper, Lagged(n) surfaced) + the winit window lane (close_requests, resize_events)")
   Component(msg, "message", "Top-level Message enum: one variant per logical interaction channel (Window, Layout, Command, Tree, Tab, Editor, Agent, Search, Logs, Theme, Render, Dialog, About, Batch, Tools, AgentDebug, Inbound, Boot)")
   Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
-  Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
+  Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules; paints through hoarfrost button_widget / text_input / combo_box + tokens")
   Component(render, "render", "Markdown viewing path: RenderEvent -> RenderBlock descriptors -> iced widgets (heading, inline, code, table, yaml)")
   Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to hoarfrost modal::ModalSizing / ModalFrame; modal resize grip + gesture lane shared with the movable shells")
   Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through hoarfrost surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
@@ -214,7 +232,6 @@ C4Component
   Component(fonts, "fonts", "iced::font::load bootstrap for the embedded icon font + platform symbol fallback")
   Component(osshell, "os_shell", "Framework-free platform wrappers: open-in-system-editor, reveal-in-file-explorer, open-URL")
   Component(logo, "logo", "The single place the shared logo mark element is constructed")
-  Component(pro, "hoarfrost (framework crate)", "Tokens, atoms, composites, menu engine, modal frames, movable hosts, z-order bands consumed by the modules above")
   Component(helpers, "test_helpers (cfg(test))", "Framework-free fixtures: test_app / test_app_state over in-memory storage")
 
   Rel(app, update, "boot -> update")
@@ -233,12 +250,7 @@ C4Component
   Rel(fonts, app, "font boot task in boot()")
   Rel(update, osshell, "platform side effects")
   Rel(panels, logo, "logo_mark")
-  Rel(menuui, pro, "surface::menu cascade + geometry::anchor")
-  Rel(overlay, pro, "modal::ModalSizing + ModalFrame")
-  Rel(movui, pro, "movable::MovableHost rectangles")
-  Rel(panels, pro, "button_widget / text_input / combo_box + tokens")
-  Rel(app, pro, "SurfaceRegistry + FocusState (derived index only)")
-  Rel(gate, pro, "token_lint scanner under an app Scope")
+  Rel(gate, view, "scans the ui_iced tree view composes")
 ```
 
 Supporting UI types (framework-free, in `ui/`): `TreeNode{name,path,is_dir,children:BTreeMap}`,
@@ -511,58 +523,68 @@ C4Component
   Rel(msg, ev, "background messages")
 ```
 
-## Component Diagram (Level 3) — `hoarfrost` crate (`src/hoarfrost/`)
+## External Container — `hoarfrost` (git dependency)
 
-`hoarfrost` implements the widget-library specification
-`src/hoarfrost/spec.md` — co-located with the crate it governs since commit
-`edbe04a` (previously `doc/planning/ui-framework.md`) — whose requirement
-IDs are `UIF-*`.
-Package `hoarfrost`, library name `hoarfrost`, iced 0.14 with the same
-renderer features `fastmd` uses plus `advanced` — the only way a custom
+`hoarfrost` is the widget-library framework `fastmd` renders through. It is
+**not a crate in this workspace**: it is an external library dependency declared
+in the root `Cargo.toml` as
+
+```toml
+hoarfrost = { git = "https://github.com/MartinKuhne/hoarfrost", rev = "dd7af16dc0d1031adcd5b90e8c789b6bf6af2900" }
+```
+
+pinned at commit `dd7af16` (upstream date **2026-10-31 (UTC 2026-11-01)**).
+Bumping the framework means editing that `rev` - `cargo update` will not move a
+`rev`-pinned git dependency on its own - and `cargo nextest run --workspace` here
+does not run the
+framework's tests, because they are not part of this workspace; the framework's
+own CI is the only place its suite runs.
+
+Its sources are no longer directories in this repo, so they get no component
+diagram here: every diagram node in this document maps to a real directory or
+module under `src/app/`. What follows is the container-level contract — what the
+dependency provides, what it deliberately does not own, and where the seams
+between the two repositories still leak. File citations below without a repo
+prefix (`surface/modal.rs:926`, `surface/menu/cascade.rs:1083`) are paths
+**inside the upstream crate**, not in this repo.
+
+**Specification.** `hoarfrost` implements the widget-library specification
+[`src/hoarfrost/spec.md`](https://github.com/MartinKuhne/hoarfrost/blob/main/src/hoarfrost/spec.md)
+in <https://github.com/MartinKuhne/hoarfrost> — co-located with the crate it
+governs since commit `edbe04a` (previously `doc/planning/ui-framework.md`) —
+whose requirement IDs are `UIF-*`. Those IDs are cited throughout `src/app` and
+are owned upstream; this repo no longer carries a copy of the spec.
+
+**Build shape.** Package `hoarfrost`, library name `hoarfrost`, iced 0.14 with
+the same renderer features `fastmd` uses plus `advanced` — the only way a custom
 widget can reach `iced_core`'s widget-author surface. The library root is
-`mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly
-in `Cargo.toml`.
+`mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly in its
+`Cargo.toml`.
 
-**Consumption status (INT-8).** `fastmd` depends on this crate and reads
-far more than its tokens. Atoms (`widget::button_widget`, `text_input`,
-`combo_box`, `badge`, `toggle`, `progress`, `hyperlink`), composites
+**Consumption status (INT-8).** `fastmd` depends on this crate and reads far more
+than its tokens: the design-token set (`token::{space, size, shape, typography,
+color, contrast}`), the atoms (`widget::button_widget`, `text_input`,
+`combo_box`, `badge`, `toggle`, `progress`, `hyperlink`), the composites
 (`composite::list_tile`, `form_field`, `tree_row`), the menu engine
 (`surface::menu`), modal frames (`surface::modal`), movable hosts
-(`surface::movable`), the z-order band model (`surface::zorder`), the
-focus model (`focus`, `bridge`) and the geometry solvers (`geometry`) are
-all live in the shipped application. What the crate's own ledger says is
-and is not satisfied lives in `src/hoarfrost/spec_coverage.rs`; what the
-*integration* does and does not take is recorded below, because the
+(`surface::movable`), the z-order band model (`surface::zorder`), the focus model
+(`focus`, `bridge`) and the geometry solvers (`geometry`) are all live in the
+shipped application. The framework's `token_lint` scanner is also what this
+repo's own gate runs: `ui_iced::token_lint_gate` drives its `scan_tree` over
+`src/app/ui_iced` under an app-supplied `Scope`, and `token_guard_tests` reuses
+its `redact_comments_and_strings` / `source_files` helpers. What the crate's own
+ledger says is and is not satisfied lives upstream in
+[`spec_coverage.rs`](https://github.com/MartinKuhne/hoarfrost/blob/main/src/hoarfrost/spec_coverage.rs);
+what the *integration* does and does not take is recorded below, because the
 ledger describes the framework and nothing in it describes the host.
 
-```mermaid
-C4Component
-  title hoarfrost — Subsystems (all consumed by fastmd: tokens, atoms, composites, menus, modal frames, movable shells)
-
-  Component(token, "token/", "Closed design-token set: space, size, shape, typography, color, contrast (UIF-TOK-001..006)")
-  Component(st, "state.rs", "Interaction state machine: exclusive BaseState plus an orthogonal focus ring, resolved purely")
-  Component(fm, "focus.rs", "Keyboard focus policy, iced-free: ordered groups, disabled members, nested traps, traversal")
-  Component(br, "bridge.rs", "One-way focus bridge: model -> iced focus router; never reads focus back")
-  Component(geo, "geometry/", "Pure boundary solvers: anchor placement/flips, movable title-bar clamps")
-  Component(at, "widget/", "Atoms: button, text input (entry/search/trigger), adaptive ring, Focusable wrapper")
-  Component(zo, "surface/zorder.rs", "Four z-bands as data: backdrop, pointer rule, key disposition, escape rank; registry routing")
-  Component(mu, "surface/menu/", "Unified fixed + context menu engine: model, row-matrix view, cascade controller")
-  Component(ho, "surface/ hosts", "modal.rs, input_dialog.rs, movable.rs — frame hosts, not widgets")
-  Component(ga, "gallery.rs + bin/gallery.rs", "UIF-VER-004 harness: the full (Variant × State) matrix across both palette worlds (Standard / InvertedEditor) and both control rungs; token-mapping gate, contrast gate")
-  Component(sc, "spec_coverage.rs", "UIF-* coverage ledger + the audit primitive")
-  Component(th, "test_helpers (cfg(test))", "Headless render/operate harness with focus read-back")
-
-  Rel(at, token, "paints only from tokens")
-  Rel(at, st, "resolves state")
-  Rel(at, fm, "registers focus members")
-  Rel(br, fm, "projects the model onto the router")
-  Rel(ho, geo, "placement and clamping")
-  Rel(ho, zo, "registers a band; answers Escape")
-  Rel(mu, geo, "card placement")
-  Rel(mu, at, "row widget")
-  Rel(ga, at, "draws the matrix")
-  Rel(ga, ho, "draws the matrix")
-```
+**Ownership contract.** No `fastmd` type appears anywhere in `hoarfrost`'s API,
+so the dependency points strictly one way — the framework has no knowledge of
+this application. The lifecycle split is binding: the framework supplies sizing,
+frame and semantics, `OverlayState` owns open / close / dismiss (see *The
+integration contract (INT-3 .. INT-8)*). The six FastMD document/log content
+tokens stay app-owned literals under decision **D-2**, and what the app still
+owns after **D-8** is listed under *What it deliberately does not own*.
 
 ### The contract it exposes
 
@@ -650,7 +672,7 @@ but are never pointer-hit.
 
 ### Known integration gaps
 
-Recorded because each is a place where the diagram above is smoother than
+Recorded because each is a place where the description above is smoother than
 the code:
 
 1. **`UIF-MOD-001`'s focus trap is not wired app-wide.** Only `Escape`
@@ -665,7 +687,7 @@ the code:
    only code that paints its layers. The app's tree and tab strip consume
    its *geometry* and *colour rules* while still drawing themselves.
 3. **`composite::search_input` does not exist.** The left panel now uses
-   the controlled `iced-pro` `TextInput` atom for its query field so Enter
+   the controlled `hoarfrost` `TextInput` atom for its query field so Enter
    can submit the live value; the surrounding magnifier/clear row remains
    app-owned because the framework has no search-input composite.
 4. **`ValidationRule::Name` accepts `..`.** `check_basename`
@@ -727,21 +749,25 @@ business domain logic.
 
 ### Coverage ledger
 
-`spec_coverage.rs` classifies all 92 numbered `UIF-*` ids
+Upstream's `spec_coverage.rs` classifies all 92 numbered `UIF-*` ids
 (`EXPECTED_SPEC_ID_COUNT`): **89 Implemented, 3 Partial (`UIF-WIN-001`,
 `UIF-PANE-002`, `UIF-PANE-003`), 0 NotOwned** —
 the 3 `Partial` items track host window lifecycle and multi-pane container composition
 while the framework provides pure clamped solvers and split primitives; zero items remain
 `NotOwned` following the D-9 framework boundary absorption. The sidecar
-test reads `CARGO_MANIFEST_DIR/spec.md` at test time — the spec has been
-co-located with the crate it governs since `edbe04a` — and asserts the two
+test reads the spec at `CARGO_MANIFEST_DIR/spec.md` — upstream's manifest
+directory, because the spec has been co-located with the crate it governs since
+`edbe04a` — and asserts the two
 sets agree in both directions, so adding an id to the spec without
-classifying it fails the build. The authoritative counts live in
+classifying it fails **upstream's** build, not this repo's: `cargo nextest run
+--workspace` here does not execute it. The authoritative counts live in
 `spec_coverage.rs`, not in this prose. The literal half of `UIF-VER-001`
 is automated since INT-8: `token_lint.rs` scans source text for colour
 constructors outside `token/color.rs` and for visually-named `pub const
 f32`s that read a bare number, and the same scanner runs over
-`src/app/ui_iced` through `ui_iced::token_lint_gate`. What that gate
+`src/app/ui_iced` through `ui_iced::token_lint_gate` — and that gate **does**
+run in this repo's suite, which makes it the one place the framework's lint
+engine is still exercised here. What that gate
 still cannot see is recorded in its own module doc: inline literals,
 non-`pub` constants, indirection, and value legality — `token_guard_tests`
 checks legality for the converted surfaces only.
