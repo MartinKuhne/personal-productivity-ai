@@ -92,7 +92,6 @@ use crate::ui_iced::message::{
     MovableCard, MovableMessage, OverlayMessage, RenderMessage, SearchMessage, TabMessage,
     ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage,
 };
-use crate::ui_iced::os_shell;
 use crate::ui_iced::panels::bottom::submit_commands;
 use crate::ui_iced::panels::left::ROW_TEXT_SIZE;
 use crate::ui_iced::persisted;
@@ -2262,7 +2261,7 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
                     state.app.orchestrator.tabs.scroll_to_header_id = Some(anchor);
                 }
             } else {
-                os_shell::open_in_system_editor(&path);
+                state.shell.open_in_system_editor(&path);
             }
         }
         crate::ui::LinkAction::ScrollToAnchor { anchor } => {
@@ -2275,7 +2274,7 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
             state.app.orchestrator.tabs.scroll_to_header_id = Some(matched);
         }
         crate::ui::LinkAction::OpenExternal(url) => {
-            os_shell::open_url(&url);
+            state.shell.open_url(&url);
         }
         crate::ui::LinkAction::NotFound { path } => {
             tracing::warn!(
@@ -2387,7 +2386,7 @@ fn reduce_about(state: &mut AppState, message: AboutMessage) -> Vec<Task<Message
             vec![iced::clipboard::write::<Message>(hash)]
         }
         AboutMessage::RepositoryOpened { url } => {
-            os_shell::open_url(&url);
+            state.shell.open_url(&url);
             Vec::new()
         }
         other => {

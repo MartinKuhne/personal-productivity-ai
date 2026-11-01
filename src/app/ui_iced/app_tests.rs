@@ -2050,13 +2050,20 @@ fn test_app_state_debug_names_the_runtime_bits_and_keeps_the_domain_opaque() {
         dump.starts_with("AppState {"),
         "the dump must identify the struct it describes, got {dump}"
     );
-    for opaque in ["<FastMdApp>", "<BusReceivers>", "<dyn UiStateStorage>"] {
+    for opaque in [
+        "<FastMdApp>",
+        "<BusReceivers>",
+        "<dyn UiStateStorage>",
+        "<dyn OsShell>",
+    ] {
         assert!(
             dump.contains(opaque),
             "the non-`Debug` domain halves must be named opaquely as {opaque}, got {dump}"
         );
     }
-    for field in ["os_scale", "viewport", "panes", "band", "models", "overlay"] {
+    for field in [
+        "os_scale", "viewport", "panes", "band", "models", "overlay", "shell",
+    ] {
         assert!(
             dump.contains(field),
             "the runtime state must be reported under the field `{field}`, got {dump}"

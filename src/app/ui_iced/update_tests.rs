@@ -27,6 +27,7 @@ use crate::ui_iced::batch_dialog::BatchDialogViewModel;
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::menu_surface::log_capture::{Capture, with_capture};
 use crate::ui_iced::message::BootMessage;
+use crate::ui_iced::os_shell::{OsShell, RecordingOsShell, ShellCall};
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
 use hoarfrost::surface::menu::model::{Row, submenu_id};
 use iced::widget::pane_grid::ResizeEvent;
@@ -76,6 +77,20 @@ fn drained(spy: &BusReader<UserCommand>) -> Vec<UserCommand> {
         seen.push(command);
     }
     seen
+}
+
+/// Replaces the state's platform shell with a fresh [`RecordingOsShell`] and
+/// hands back the handle to assert on.
+///
+/// Every reducer test that produces an OS side effect must go through this: the
+/// production [`OpenerShell`](crate::ui_iced::os_shell::OpenerShell) would
+/// really launch a browser or an editor, which is not test-environment safe
+/// ([RUST-006]).
+fn record_shell(state: &mut AppState) -> Arc<RecordingOsShell> {
+    let shell = Arc::new(RecordingOsShell::new());
+    let injected: Arc<dyn OsShell> = shell.clone();
+    state.shell = injected;
+    shell
 }
 
 fn user_file_operation_events(
@@ -2618,6 +2633,7 @@ fn test_cancel_and_dismiss_both_close_the_dialog_without_publishing() {
 #[test]
 fn test_about_repository_press_keeps_the_card_open() {
     let (mut state, _storage) = fresh_state();
+    let shell = record_shell(&mut state);
     state.overlay.about.open_about();
 
     let _ = update(
@@ -2632,6 +2648,94 @@ fn test_about_repository_press_keeps_the_card_open() {
     // switch to a second window and must not dismiss the card.
     assert!(state.overlay.about.is_about());
     assert_eq!(state.mounted_layers(), vec![OverlayLayer::About]);
+
+    // And the open is a *recorded* intent, not a real browser launch: the
+    // reducer must hand the exact URL to the injected shell and never reach
+    // `opener` from a unit test ([RUST-006]).
+    assert_eq!(
+        shell.calls(),
+        vec![ShellCall::OpenUrl(
+            "https://github.com/dtolnay/anyhow".to_string()
+        )],
+        "the reducer must route the press to the injected shell with the exact URL"
+    );
+}
+
+/// The `RenderMessage::LinkActivated` twin of
+/// [`test_about_repository_press_keeps_the_card_open`]: an external URL in a
+/// rendered document resolves to `LinkAction::OpenExternal` and must reach the
+/// injected shell, not the OS.
+#[test]
+fn test_external_link_activation_opens_through_the_injected_shell() {
+    let (mut state, _storage) = fresh_state();
+    let shell = record_shell(&mut state);
+
+    let _ = update(
+        &mut state,
+        Message::Render(RenderMessage::LinkActivated {
+            url: "https://example.com/release-notes".into(),
+            source_file: None,
+        }),
+    );
+
+    assert_eq!(
+        shell.urls(),
+        vec!["https://example.com/release-notes".to_string()],
+        "an external link must be opened through the seam, exactly once"
+    );
+}
+
+/// The third OS-shell arm of `open_link`: a known workspace file that is not
+/// Markdown is handed to the system editor — through the seam, so a reducer
+/// test cannot launch a real editor ([RUST-006]).
+#[test]
+fn test_non_markdown_workspace_link_goes_to_the_injected_shell_editor() {
+    let (mut state, _storage) = fresh_state();
+    let shell = record_shell(&mut state);
+    let target = PathBuf::from("sheet.csv");
+    state.app.workspace_mut().all_files = vec![target.clone()];
+
+    let _ = update(
+        &mut state,
+        Message::Render(RenderMessage::LinkActivated {
+            url: "sheet.csv".into(),
+            source_file: None,
+        }),
+    );
+
+    assert_eq!(
+        shell.calls(),
+        vec![ShellCall::OpenInSystemEditor(target)],
+        "a non-Markdown workspace link must be handed to the editor wrapper"
+    );
+}
+
+/// An in-page anchor is **not** an OS-shell call: the reducer must scroll, and
+/// the seam must stay untouched. This is what keeps the two tests above from
+/// passing for the wrong reason (a shell that recorded everything).
+#[test]
+fn test_anchor_activation_touches_no_shell() {
+    let (mut state, _storage) = fresh_state();
+    let shell = record_shell(&mut state);
+
+    let _ = update(
+        &mut state,
+        Message::Render(RenderMessage::LinkActivated {
+            url: "#getting-started".into(),
+            source_file: None,
+        }),
+    );
+
+    assert_eq!(
+        shell.calls(),
+        Vec::<ShellCall>::new(),
+        "scrolling to an anchor must not reach the platform shell"
+    );
+    assert_eq!(
+        state.app.orchestrator.tabs.scroll_to_header_id.as_deref(),
+        Some("getting-started"),
+        "the anchor must still be recorded for the scroll"
+    );
 }
 
 #[test]

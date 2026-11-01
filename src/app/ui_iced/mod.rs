@@ -104,7 +104,9 @@
 //!   stacks the context menu, editor, dialogs, log viewer, debug window,
 //!   tools, About and batch windows in a fixed draw order.
 //! - [`os_shell`] — the framework-free platform wrappers the reducer calls:
-//!   open-in-system-editor, reveal-in-file-explorer and open-URL.
+//!   open-in-system-editor, reveal-in-file-explorer and open-URL, reached through
+//!   the injectable [`os_shell::OsShell`] seam held on [`app::AppState`] so a
+//!   test records the intent instead of launching a real process.
 //! - `test_helpers` — `#[cfg(test)]` framework-free fixtures that build a
 //!   `FastMdApp` or a whole [`app::AppState`] over in-memory storage for
 //!   the iced sidecar tests ([RUST-006]).

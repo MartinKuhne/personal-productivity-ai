@@ -86,6 +86,7 @@ use crate::ui_iced::layout;
 use crate::ui_iced::logs::{BackgroundLogsViewModel, ScrollSnapshot};
 use crate::ui_iced::menu_surface::{refusal_label, refusal_row};
 use crate::ui_iced::message::{BootMessage, Message, WindowMessage};
+use crate::ui_iced::os_shell::{OpenerShell, OsShell};
 use crate::ui_iced::panels::bottom::BottomPanelViewModel;
 use crate::ui_iced::panels::center::CenterPanelViewModel;
 use crate::ui_iced::panels::left::LeftPanelViewModel;
@@ -159,6 +160,13 @@ pub struct AppState {
     /// Injected UI-state storage handler ([RUST-024]). Used by the
     /// close/save reduction in [`crate::ui_iced::update`].
     pub storage: Arc<dyn UiStateStorage>,
+    /// Injected platform-shell seam ([RUST-024]). Every OS side effect the
+    /// reducer performs — open in editor, reveal in explorer, open a URL — goes
+    /// through this handle and nowhere else, so a test can install
+    /// [`RecordingOsShell`](crate::ui_iced::os_shell::RecordingOsShell) and
+    /// observe the intent instead of launching a real process ([RUST-006]).
+    /// [`build_state`] wires the production [`OpenerShell`].
+    pub shell: Arc<dyn OsShell>,
     /// OS-reported DPI baseline captured at boot; `None` until the chained
     /// `window::latest()` → `window::scale_factor` task settles.
     ///
@@ -1787,6 +1795,7 @@ impl core::fmt::Debug for AppState {
             .field("app", &"<FastMdApp>")
             .field("receivers", &"<BusReceivers>")
             .field("storage", &"<dyn UiStateStorage>")
+            .field("shell", &"<dyn OsShell>")
             .field("os_scale", &self.os_scale)
             .field("viewport", &self.viewport)
             .field("panes", &self.panes)
@@ -1829,6 +1838,13 @@ pub struct LaunchInputs {
 /// 3. the real background-event `rx` is handed to the [`BusReceivers`]
 ///    bridge, so the orchestrator's own `rx` drain is unused and gets an
 ///    inert, never-fed channel. The bridge is the single inbound path.
+///
+/// The platform-shell seam is wired here as well: [`AppState::shell`] gets the
+/// production [`OpenerShell`], so this is the one place the concrete `opener`
+/// implementation is chosen. A test (or a replay harness that must not launch
+/// browsers) replaces the field with
+/// [`RecordingOsShell`](crate::ui_iced::os_shell::RecordingOsShell) after
+/// construction.
 ///
 /// Side effects at construction: the FastMD font collections are
 /// registered synchronously into the shared iced font system (first thing,
@@ -2076,6 +2092,7 @@ pub fn build_state(
         app,
         receivers,
         storage: ui_state_storage,
+        shell: Arc::new(OpenerShell),
         os_scale: None,
         viewport,
         panes,
