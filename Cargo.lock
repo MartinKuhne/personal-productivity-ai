@@ -2218,13 +2218,12 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "hoarfrost"
 version = "0.2.0"
+source = "git+https://github.com/MartinKuhne/hoarfrost?rev=dd7af16dc0d1031adcd5b90e8c789b6bf6af2900#dd7af16dc0d1031adcd5b90e8c789b6bf6af2900"
 dependencies = [
  "iced",
  "iced_futures",
  "iced_renderer",
  "iced_runtime",
- "iced_test",
- "proptest",
 ]
 
 [[package]]

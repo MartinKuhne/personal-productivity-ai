@@ -2,6 +2,81 @@
 
 use super::*;
 
+/// Repo root — the `fastmd` package's manifest is the workspace root (`[lib]
+/// path = "src/app/lib.rs"`), so `CARGO_MANIFEST_DIR` is the root and
+/// `Cargo.lock` sits next to it.
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+}
+
+/// The text of the committed `Cargo.lock` at the repo root.
+fn committed_cargo_lock() -> String {
+    let path = repo_root().join("Cargo.lock");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+/// Dependency names declared by every `git+`-sourced package in the `Cargo.lock`
+/// text `lock`.
+///
+/// # Why the lock file is the authority
+///
+/// `hoarfrost` stopped being a workspace member on 2026-11-01 and is now a git
+/// dependency pinned by `rev` (see `doc/planning/hoarfrost-external-crate-plan.md`),
+/// so its `Cargo.toml` is no longer in this repo and cannot be scanned like the
+/// workspace manifests. Its direct dependencies still compile into the shipped
+/// binary and must stay attributed.
+///
+/// A hand-copied list of them cannot enforce that: cargo rewrites `Cargo.lock`
+/// whenever the pinned `rev` moves, so a dependency added or dropped upstream
+/// changes this set in the very commit that changes what ships. A restated list
+/// only fires when a human remembers to edit it, and passes silently when
+/// upstream adds a crate nobody copied — exactly the way an unattributed crate
+/// ends up in the binary. Deriving from the lock closes that hole in both
+/// directions: added deps appear here automatically, dropped ones disappear.
+///
+/// Parsing follows this file's existing style: plain line scanning, no TOML
+/// crate. A `[[package]]` header starts a block, `source = "git+…"` marks it,
+/// and its `dependencies = [ … ]` entries are `"name"`, `"name version"` or
+/// `"name version (source)"` — the name is everything before the first space.
+fn git_sourced_dependency_names(lock: &str) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    // Whether the block currently being scanned is git-sourced, and whether the
+    // line reader is inside that block's dependency list.
+    let mut block_is_git = false;
+    let mut in_git_deps = false;
+
+    for line in lock.lines() {
+        let trimmed = line.trim();
+
+        if trimmed == "[[package]]" {
+            block_is_git = false;
+            in_git_deps = false;
+            continue;
+        }
+
+        if in_git_deps {
+            if trimmed == "]" {
+                in_git_deps = false;
+            } else if let Some(entry) = trimmed.split('"').nth(1) {
+                let name = entry.split(' ').next().unwrap_or(entry);
+                if !name.is_empty() {
+                    names.insert(name.to_string());
+                }
+            }
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("source = ") {
+            block_is_git = value.trim().starts_with("\"git+");
+        } else if trimmed == "dependencies = [" && block_is_git {
+            in_git_deps = true;
+        }
+    }
+
+    names
+}
+
 #[test]
 fn all_entries_have_valid_fields() {
     assert_eq!(
@@ -53,17 +128,14 @@ fn completeness_against_cargo_manifests() {
         "src/agent/Cargo.toml",
         "src/md2pdf/Cargo.toml",
         "src/fastmd-tool-macros/Cargo.toml",
-        // Scanned since INT-1: `fastmd` now depends on `hoarfrost`, so its
-        // third-party deps ride into the `fastmd` binary as well.
-        "src/hoarfrost/Cargo.toml",
     ];
 
-    // Workspace-internal crates are excluded from the third-party
-    // attribution catalog by design (see `attributions.rs` module doc).
-    // `hoarfrost` joins the list because INT-1 made it a direct path
-    // dependency of `fastmd`; it is our own crate, not a third party, so
-    // it must not appear in the About dialog's third-party list.
-    let workspace_members: std::collections::HashSet<String> = [
+    // Crates of our own are excluded from the third-party attribution catalog
+    // by design (see `attributions.rs` module doc). `hoarfrost` stays in this
+    // set although it left the workspace on 2026-11-01: it is the project's own
+    // framework, whether it is vendored in-tree or fetched from git, so it must
+    // never appear in the About dialog's third-party list.
+    let internal_crates: std::collections::HashSet<String> = [
         "fastmd",
         "fastmd-agent",
         "fastmd-pdf",
@@ -117,8 +189,8 @@ fn completeness_against_cargo_manifests() {
                 if name.is_empty() || name.starts_with('#') {
                     continue;
                 }
-                // Filter workspace members.
-                if workspace_members.contains(name) {
+                // Filter our own crates.
+                if internal_crates.contains(name) {
                     continue;
                 }
                 // Skip known non-crate entries like `fastmd-pdf` optional internal path dep already filtered,
@@ -127,6 +199,11 @@ fn completeness_against_cargo_manifests() {
             }
         }
     }
+
+    // `hoarfrost`'s own manifest is no longer in this repo, so its direct deps
+    // cannot be parsed above; they still ship in the binary, so they are read
+    // out of the committed lock file, which cargo rewrites on every `rev` bump.
+    expected.extend(git_sourced_dependency_names(&committed_cargo_lock()));
 
     // The manifest set is authoritative; ensure our parser found at least that many.
     // Some manifests include optional deps (e.g., rfd) which are direct deps but optional.
@@ -147,5 +224,100 @@ fn completeness_against_cargo_manifests() {
     assert!(
         extra.is_empty(),
         "DIRECT_DEPENDENCIES contains extra crates not in Cargo.toml manifests: {extra:?}; expected={expected:?} actual={actual:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Anti-vacuity tests for the lock-file derivation
+// ---------------------------------------------------------------------------
+
+/// A lock file with one git-sourced package with two dependencies and one
+/// registry package with a dependency of its own. Only the git package's
+/// dependencies may be reported.
+const SYNTHETIC_LOCK: &str = r#"# This file is automatically @generated by Cargo.
+# It is not intended for manual editing.
+version = 4
+
+[[package]]
+name = "framework"
+version = "0.2.0"
+source = "git+https://example.com/vendor/framework?rev=deadbee#deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+dependencies = [
+ "alpha",
+ "beta 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "gamma"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "widget"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+dependencies = [
+ "alpha 1.4.2",
+ "gamma",
+]
+"#;
+
+#[test]
+fn lock_derivation_finds_git_packages_in_the_committed_lock() {
+    // The real lock must produce a non-empty set: an empty result would make
+    // the completeness check silently stop covering `hoarfrost`'s deps.
+    let names = git_sourced_dependency_names(&committed_cargo_lock());
+    assert!(
+        !names.is_empty(),
+        "deriving git-sourced dependencies from the committed Cargo.lock produced nothing"
+    );
+}
+
+#[test]
+fn lock_derivation_finds_the_hoarfrost_git_package() {
+    let names = git_sourced_dependency_names(&committed_cargo_lock());
+
+    // `hoarfrost` is the git-sourced package in this lock, and these are the
+    // crates it hands to the compiler. If upstream adds one, it must show up
+    // here without this test being edited; if it drops one, it must disappear.
+    for expected in ["iced", "iced_futures", "iced_renderer", "iced_runtime"] {
+        assert!(
+            names.contains(expected),
+            "Cargo.lock's git-sourced packages do not yield {expected:?}; got {names:?}"
+        );
+    }
+
+    // `serde` is pulled in by registry packages only. Reporting it would mean
+    // the scan swept up registry dependencies as well.
+    assert!(
+        !names.contains("serde"),
+        "the lock scan reported a registry-only dependency: {names:?}"
+    );
+}
+
+#[test]
+fn lock_derivation_reports_only_git_sourced_dependencies() {
+    let names = git_sourced_dependency_names(SYNTHETIC_LOCK);
+    let expected: std::collections::BTreeSet<String> =
+        ["alpha", "beta"].iter().map(|s| (*s).to_string()).collect();
+
+    assert_eq!(names, expected, "unexpected git-sourced dependency set");
+}
+
+#[test]
+fn lock_derivation_is_empty_without_git_packages() {
+    let lock = SYNTHETIC_LOCK.replace(
+        "source = \"git+https://example.com/vendor/framework?rev=deadbee#deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\"",
+        "source = \"registry+https://github.com/rust-lang/crates.io-index\"",
+    );
+    assert!(
+        git_sourced_dependency_names(&lock).is_empty(),
+        "a lock file with no git-sourced package must yield no dependencies"
+    );
+    assert!(
+        git_sourced_dependency_names("").is_empty(),
+        "an empty lock file must yield no dependencies"
     );
 }

@@ -13,7 +13,6 @@ members = [
     ".",
     "src/agent",
     "src/fastmd-tool-macros",
-    "src/hoarfrost",
     "src/md2pdf",
 ]
 
@@ -107,10 +106,18 @@ tempfile = "3.8"
 rfd = "0.17"
 fastmd-pdf = { path = "src/md2pdf" }
 # `hoarfrost` — the framework crate that owns the `UIF-TOK-005` design tokens.
-# Since increment INT-1 it is `fastmd`'s single source of design truth:
+# It is an EXTERNAL crate now, not a workspace member: it is fetched from
+# <https://github.com/MartinKuhne/hoarfrost>, so `--workspace` here builds it as
+# a dependency and neither lints nor compiles its tests.
+# It is still `fastmd`'s single source of design truth since increment INT-1:
 # `src/app/ui/theme.rs` derives every overlapping semantic palette token
 # from `hoarfrost::token::color::Palette::dark()` instead of a literal.
-hoarfrost = { path = "src/hoarfrost" }
+# The `rev` pins commit `dd7af16`, upstream date 2026-10-31 (UTC 2026-11-01).
+# Bumping the framework MEANS EDITING THIS `rev` — `cargo update` will not move
+# a rev-pinned git dependency on its own.
+# The crate's own spec (the `UIF-*` requirement IDs) and its test suite now live
+# upstream, so `cargo nextest run --workspace` here no longer runs them.
+hoarfrost = { git = "https://github.com/MartinKuhne/hoarfrost", rev = "dd7af16dc0d1031adcd5b90e8c789b6bf6af2900" }
 arc-swap = "1.9.2"
 async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
 text-splitter = { version = "0.32", optional = true }
