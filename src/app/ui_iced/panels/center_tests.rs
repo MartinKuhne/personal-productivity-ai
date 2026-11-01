@@ -18,7 +18,8 @@
 // on purpose: pinning the band budget and the indicator's weight is the whole
 // point, so a retuned token must fail the suite rather than pass silently.
 // `clippy::assertions_on_constants` cannot tell a spec pin from a tautology
-// (same treatment as `left_tests.rs` and `src/hoarfrost/token/*_tests.rs`).
+// (same treatment as `left_tests.rs` and the framework's upstream
+// `token/*_tests.rs` sidecars).
 #![allow(clippy::assertions_on_constants)]
 
 use super::*;

@@ -4,9 +4,11 @@
 //!
 //! Three kinds of check live here, and each is written so that a **scanner
 //! which quietly stopped matching goes red too** -- the found-count is
-//! asserted, never assumed. That shape is copied from
-//! `hoarfrost/token_lint_tests.rs::no_line_height_call_hands_iced_a_bare_f32`,
-//! the only precedent in this repo for auditing source rather than values.
+//! asserted, never assumed. That shape is copied from upstream hoarfrost's
+//! `token_lint_tests.rs::no_line_height_call_hands_iced_a_bare_f32` -- the
+//! only precedent for auditing source rather than values, and it lives in the
+//! hoarfrost repo now that the framework is a git dependency rather than a
+//! workspace member here.
 //!
 //! * **Source scan** -- reads the converted files with comments and string
 //!   literals redacted and rejects a bare numeric literal reaching `.size(..)`

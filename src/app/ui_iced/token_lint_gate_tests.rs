@@ -7,8 +7,8 @@
 //! matching. The pinned counts are the anti-vacuity half; the injected
 //! fixtures are the proof it still bites.
 //!
-//! The injected-failure tests follow the house pattern from
-//! [`token_lint_tests`](hoarfrost::token_lint_tests): the real code path,
+//! The injected-failure tests follow the house pattern from upstream
+//! hoarfrost's `token_lint_tests` module: the real code path,
 //! one doctored input, the guard observed firing on every run rather than
 //! trusted.
 //!

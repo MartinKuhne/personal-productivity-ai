@@ -4,7 +4,9 @@
 //! # Why this module exists
 //!
 //! [`hoarfrost::token_lint`] shipped as a self-audit: it read
-//! hoarfrost's `widget/`, `surface/` and `composite/` and nothing else.
+//! hoarfrost's own `widget/`, `surface/` and `composite/` trees and nothing
+//! else -- those directories are upstream today, in the hoarfrost repo the
+//! framework is fetched from, not in this one.
 //! That left the half of the interface this crate actually draws entirely
 //! ungated — no rule reached a hard-coded padding, radius, stroke or size
 //! in `src/app/ui_iced`, and no rule reached a colour constructor outside

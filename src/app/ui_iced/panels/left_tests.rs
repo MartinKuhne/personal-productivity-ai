@@ -14,8 +14,8 @@
 // Several assertions in the INT-7b section target compile-time token values
 // on purpose: pinning a constant is the whole point, so a retuned rung must
 // fail the suite rather than pass silently. `clippy::assertions_on_constants`
-// cannot tell a spec pin from a tautology (same treatment as
-// `src/hoarfrost/token/*_tests.rs`).
+// cannot tell a spec pin from a tautology (same treatment as the framework's
+// upstream `token/*_tests.rs` sidecars).
 #![allow(clippy::assertions_on_constants)]
 
 use super::*;
