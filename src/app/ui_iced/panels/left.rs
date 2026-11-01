@@ -41,7 +41,8 @@
 //! module**. It resolves [`tree_row::TreeRowSlots`], [`tree_row::TreeRowStyle`]
 //! and [`hoarfrost::widget::button_widget::Layer`] rectangles; the only
 //! thing that turns them into pixels is the gallery's canvas renderer
-//! ([`gallery_tree`](hoarfrost::gallery_tree)). There is no
+//! (`hoarfrost::gallery_tree`, upstream and behind that crate's `gallery`
+//! feature, so it is not linkable from here). There is no
 //! `tree_row::view(..)` returning an `iced::Element`, so "use the
 //! composite for row rendering" cannot be done from an iced widget tree
 //! without writing a new widget in the framework.

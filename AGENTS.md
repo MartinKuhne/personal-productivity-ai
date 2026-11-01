@@ -94,27 +94,41 @@ Before marking any task as complete, run the following from `/` and ensure they 
 
 ### External framework: `hoarfrost`
 
-The UI widget library and design-token source (`hoarfrost`) is **not** in this repo. It is an
-external git dependency pinned by `rev` in the root `Cargo.toml`
-(`hoarfrost = { git = "https://github.com/MartinKuhne/hoarfrost", rev = "dd7af16…" }`).
+The UI widget library and design-token source (`hoarfrost`) is **not** in this repo. It is a
+crates.io dependency in the root `Cargo.toml`
+(`hoarfrost = { version = "0.14.0", features = [ "badge", "button", … ] }`), published from
+<https://github.com/MartinKuhne/hoarfrost>. Its versions track iced's, so `0.14.0` is the same
+framework the old in-tree crate called `0.2.0`.
 
+- You MUST name features explicitly: the crate declares `default = []`, so a bare version
+  requirement compiles **zero widgets**. This repo lists the widgets it actually imports rather
+  than `all`, so a widget the app starts using fails to compile until its feature is named, and
+  one it stops using leaves the build. The ungated modules (`token`, `token_lint`, `geometry`,
+  `focus`, `binding`, `bridge`, `state`, `validation`) need no feature.
+- The headless capture harness is `hoarfrost::test_helpers`, behind the `test-helpers` feature.
+  It is declared in `[dev-dependencies]`, NOT in the normal dependency, so it compiles for test
+  targets only and never reaches the shipped binary. Use its `screenshot` / `Capture` / `Frame`
+  instead of writing another headless-render harness.
 - You MUST treat its spec (the `UIF-*` requirement IDs in upstream `src/hoarfrost/spec.md`) and its
   test suite as living upstream at <https://github.com/MartinKuhne/hoarfrost>. `cargo nextest run
   --workspace` here does NOT run them, and `cargo clippy --workspace` does not lint them — the
   framework's own CI is the only place its gates run.
-- You MUST bump the framework by editing that `rev` to the new upstream commit SHA, and the bump
-  commit message MUST name what moved (old → new SHA, upstream PR/commit subject), because a `rev`
-  carries no readable version. `cargo update` will NOT move a `rev`-pinned git dependency on its own.
+- You MUST bump the framework by editing the version requirement, and the bump commit message MUST
+  name what moved (old → new version, upstream PR/commit subject), because a version bump carries no
+  otherwise readable history here. `cargo update -p hoarfrost` moves within the declared requirement;
+  a new minor or major needs the requirement edited.
 - When you work on the framework itself you MUST use the two-repo loop: clone it alongside this repo
   (`git clone https://github.com/MartinKuhne/hoarfrost ../hoarfrost`), then add a
-  `[patch."https://github.com/MartinKuhne/hoarfrost"]` block with
-  `hoarfrost = { path = "../hoarfrost/src/hoarfrost" }` to the root `Cargo.toml` — **locally and
-  uncommitted**, never committed. This is verified to work.
+  `[patch.crates-io]` block with `hoarfrost = { path = "../hoarfrost/src/hoarfrost" }` to the root
+  `Cargo.toml` — **locally and uncommitted**, never committed. This is verified to work.
 - You MUST NOT use the `--config` command-line equivalent of that patch: under PowerShell the inner
   quotes are stripped before cargo sees the argument. Use the manifest block above, or a user-level
   `paths = [...]` override in `%USERPROFILE%\.cargo\config.toml`.
-- Until the `rev` is bumped, `cargo nextest run --workspace` in this repo tests the *pinned*
-  framework, not your working copy. You MUST say so in the PR body of any cross-repo change.
+- Without that patch block, `cargo nextest run --workspace` in this repo tests the *published*
+  crates.io crate, not your working clone. You MUST say so in the PR body of any cross-repo change.
+  A `[patch.crates-io]` override is only accepted when the local crate's `version` still satisfies
+  the requirement in `Cargo.toml`, so bump the clone's version to match before expecting the patch
+  to take effect.
 
 ### Observabsility
 

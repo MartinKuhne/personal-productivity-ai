@@ -65,7 +65,7 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
-  Container_Ext(hoarfrost, "hoarfrost (external crate)", "External git dependency, NOT a workspace member: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
+  Container_Ext(hoarfrost, "hoarfrost (external crate)", "External crates.io dependency v0.14.0, NOT a workspace member: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
@@ -88,11 +88,10 @@ There are two crates in this workspace that matter to the picture above:
 and observes events from `fastmd-agent`.
 
 `hoarfrost` is **not** a third workspace crate. It is an external library
-dependency, fetched from <https://github.com/MartinKuhne/hoarfrost> and pinned by
-`rev` in the root `Cargo.toml` (commit `dd7af16`, upstream date 2026-10-31
-(UTC 2026-11-01)), so
-cargo builds it as a dependency of `fastmd` and never as a member of this
-workspace. See *External Container — `hoarfrost`* further down.
+dependency published to crates.io from <https://github.com/MartinKuhne/hoarfrost>
+and required by version in the root `Cargo.toml` (`0.14.0`, published
+2026-11-01), so cargo builds it as a dependency of `fastmd` and never as a
+member of this workspace. See *External Container — `hoarfrost`* further down.
 
 `hoarfrost` is consumed by the application in two distinct ways, and the
 distinction is the one thing a reader should carry away from this section.
@@ -523,22 +522,22 @@ C4Component
   Rel(msg, ev, "background messages")
 ```
 
-## External Container — `hoarfrost` (git dependency)
+## External Container — `hoarfrost` (crates.io dependency)
 
 `hoarfrost` is the widget-library framework `fastmd` renders through. It is
-**not a crate in this workspace**: it is an external library dependency declared
-in the root `Cargo.toml` as
+**not a crate in this workspace**: it is an external library dependency published
+to crates.io from <https://github.com/MartinKuhne/hoarfrost> and declared in the
+root `Cargo.toml` as
 
 ```toml
-hoarfrost = { git = "https://github.com/MartinKuhne/hoarfrost", rev = "dd7af16dc0d1031adcd5b90e8c789b6bf6af2900" }
+hoarfrost = { version = "0.14.0", features = [ "badge", "button", "combo-box", … ] }
 ```
 
-pinned at commit `dd7af16` (upstream date **2026-10-31 (UTC 2026-11-01)**).
-Bumping the framework means editing that `rev` - `cargo update` will not move a
-`rev`-pinned git dependency on its own - and `cargo nextest run --workspace` here
-does not run the
-framework's tests, because they are not part of this workspace; the framework's
-own CI is the only place its suite runs.
+Versions track iced's, so `0.14.0` is the same framework the in-tree crate called
+`0.2.0`; it was published 2026-11-01. Bumping the framework means editing that
+requirement (`cargo update -p hoarfrost` moves within it), and `cargo nextest run
+--workspace` here does not run the framework's tests, because they are not part
+of this workspace; the framework's own CI is the only place its suite runs.
 
 Its sources are no longer directories in this repo, so they get no component
 diagram here: every diagram node in this document maps to a real directory or
@@ -559,7 +558,12 @@ are owned upstream; this repo no longer carries a copy of the spec.
 the same renderer features `fastmd` uses plus `advanced` — the only way a custom
 widget can reach `iced_core`'s widget-author surface. The library root is
 `mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly in its
-`Cargo.toml`.
+`Cargo.toml`. Every widget module is behind a cargo feature and the crate
+declares `default = []`, so a consumer that does not name features compiles zero
+widgets; `fastmd` names the widgets it imports rather than taking `all`, and the
+modules its own gate drives — `token`, `token_lint`, `geometry` — are
+deliberately ungated. The headless test harness (`test_helpers`) is requested
+through `[dev-dependencies]` so it stays out of the shipped binary.
 
 **Consumption status (INT-8).** `fastmd` depends on this crate and reads far more
 than its tokens: the design-token set (`token::{space, size, shape, typography,

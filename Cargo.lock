@@ -2217,8 +2217,9 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hoarfrost"
-version = "0.2.0"
-source = "git+https://github.com/MartinKuhne/hoarfrost?rev=dd7af16dc0d1031adcd5b90e8c789b6bf6af2900#dd7af16dc0d1031adcd5b90e8c789b6bf6af2900"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59a9500d50caf85de4354380b5bb0e0cabf74e765c180fd6f1e01520b0fe145a"
 dependencies = [
  "iced",
  "iced_futures",
