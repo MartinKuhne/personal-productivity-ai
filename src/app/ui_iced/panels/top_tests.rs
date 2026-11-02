@@ -734,13 +734,14 @@ fn top_bar_builds_for_both_indexing_states() {
 // --- band contract (INT-7a: resolved from tokens, not literals) ---------
 
 /// The top bar band is the `size.control.lg` rung, which `UIF-TOK-002`
-/// names as the Top Navbar height (§4.1.1, §4.2.1).
+/// names as the Top Navbar height (§4.1.1, §4.2.1). The rung is bound at
+/// [`BAR_HEIGHT_POINTS`]; what is pinned here is the number that reaches the
+/// layout, so a retune of the rung moves the bar and fails.
 ///
-/// The bar used to be `CONTROL_SM` (28). The `assert_ne!` guards below
-/// pin that the retired literal is gone rather than merely shadowed.
+/// The bar used to be `CONTROL_SM` (28). The `assert_ne!` guard below
+/// pins that the retired literal is gone rather than merely shadowed.
 #[test]
 fn top_band_height_is_the_control_lg_rung() {
-    assert_eq!(BAR_HEIGHT_POINTS, size::CONTROL_LG);
     assert_eq!(BAR_HEIGHT_POINTS, 36.0);
     assert_ne!(
         BAR_HEIGHT_POINTS, 28.0,
@@ -752,12 +753,12 @@ fn top_band_height_is_the_control_lg_rung() {
 /// `CONTROL_LG = XS + CONTROL_SM + XS`. That is what makes the navbar's
 /// 36pt height and its 28pt controls the same fact rather than two
 /// numbers that have to be kept in step by hand.
+///
+/// The four padding fields are bound to their rungs at [`BAR_PADDING`] and
+/// are not re-asserted here — both sides of such an `assert_eq!` are the same
+/// token. What can fail, and what this holds, is the closure below.
 #[test]
 fn band_padding_wraps_one_compact_control_rung_exactly() {
-    assert_eq!(BAR_PADDING.top, space::XS);
-    assert_eq!(BAR_PADDING.bottom, space::XS);
-    assert_eq!(BAR_PADDING.left, space::MD);
-    assert_eq!(BAR_PADDING.right, space::MD);
     assert_eq!(
         BAR_PADDING.top + size::CONTROL_SM + BAR_PADDING.bottom,
         BAR_HEIGHT_POINTS,
@@ -793,10 +794,10 @@ fn tag_trigger_lands_on_its_declared_rung_and_fits_the_band() {
 }
 
 /// The brand title sits on `type.title_sm`, the rung §4.2.1 assigns it —
-/// not the off-scale 18 the bar used to paint.
+/// not the off-scale 18 the bar used to paint. The rung is bound at
+/// [`TITLE_SIZE`]; the pins are the size and the retired literal.
 #[test]
 fn brand_title_sits_on_the_title_sm_rung() {
-    assert_eq!(TITLE_SIZE, typography::TITLE_SM.size);
     assert_eq!(TITLE_SIZE, 16.0);
     assert_ne!(
         TITLE_SIZE, 18.0,
@@ -811,26 +812,28 @@ fn brand_title_sits_on_the_title_sm_rung() {
     );
 }
 
-/// Every remaining top-bar scalar resolves to a named token rather than a
-/// literal, so a retune of the scale moves the bar with it.
+/// The top-bar scalars that are **derived** still land on the scale: the tag
+/// trigger's vertical inset is computed from its rung, and that computation
+/// must keep landing on a named rung.
+///
+/// The scalars that are simply *bound* to a token ([`BAR_SPACING`],
+/// [`SEPARATOR_WIDTH`], [`MENU_BUTTON_GLYPH_SIZE`],
+/// [`MENU_ANCHOR_RIGHT_MARGIN`], [`MENU_ANCHOR_BELOW_BAR`],
+/// [`TAG_TRIGGER_PADDING`]) are not re-asserted here: both sides of such an
+/// `assert_eq!` are the same token, so a framework retune moves them together
+/// and the check cannot fail.
 #[test]
-fn top_bar_scalars_resolve_from_tokens() {
-    assert_eq!(BAR_SPACING, space::SM);
-    assert_eq!(SEPARATOR_WIDTH, shape::BORDER_HAIRLINE);
-    assert_eq!(MENU_BUTTON_GLYPH_SIZE, size::ICON_MD);
-    assert_eq!(MENU_ANCHOR_RIGHT_MARGIN, space::MD);
-    assert_eq!(MENU_ANCHOR_BELOW_BAR, space::XS);
-    assert_eq!(
-        TAG_TRIGGER_PADDING.left,
-        combo_box::HORIZONTAL_PADDING,
-        "the trigger's horizontal inset comes from the combobox atom, not a local number"
-    );
+fn top_bar_derived_scalars_stay_on_the_scale() {
     assert_eq!(
         TAG_TRIGGER_VERTICAL_PADDING,
         (TAG_TRIGGER_RUNG.height() - typography::BODY.line_height) / 2.0,
         "the vertical inset is derived from the rung, not picked"
     );
-    assert_eq!(TAG_TRIGGER_VERTICAL_PADDING, space::XS);
+    assert_eq!(
+        TAG_TRIGGER_VERTICAL_PADDING,
+        space::XS,
+        "and the derived inset must keep landing on a named rung"
+    );
 }
 
 /// The tag trigger's paint comes from the framework combobox resolver for

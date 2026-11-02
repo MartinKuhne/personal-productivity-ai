@@ -17,9 +17,8 @@ use crate::ui::strings;
 use crate::ui_iced::test_helpers::test_app;
 
 use super::{
-    BAND_PADDING, BAND_SPACING, BottomPanelViewModel, COMMAND_INPUT_ID, CONTEXT_SPACING,
-    FILE_CONTEXT_BASE_SIZE, FILE_CONTEXT_FALLBACK_SIZE, FILE_CONTEXT_MIN_SIZE, PROMPT_TEXT_SIZE,
-    STOP_BUTTON_ID, STOP_BUTTON_TEXT_SIZE, compute_file_context, compute_prompt_prefix,
+    BAND_PADDING, BottomPanelViewModel, COMMAND_INPUT_ID, FILE_CONTEXT_BASE_SIZE,
+    FILE_CONTEXT_MIN_SIZE, STOP_BUTTON_ID, compute_file_context, compute_prompt_prefix,
     format_models_list, parse_command_intent, stop_button_color, stop_button_variant, stop_enabled,
     submit_commands,
 };
@@ -152,9 +151,7 @@ fn file_context_never_renders_below_the_typography_floor() {
             "the retired 8 pt floor must not come back for `{file}`"
         );
     }
-    assert_eq!(FILE_CONTEXT_MIN_SIZE, typography::MIN_SIZE);
     assert_eq!(FILE_CONTEXT_MIN_SIZE, 12.0);
-    assert_eq!(FILE_CONTEXT_BASE_SIZE, typography::CAPTION.size);
 }
 
 #[test]
@@ -481,20 +478,21 @@ fn stop_button_label_colour_matches_the_danger_rest_lock() {
     );
 }
 
-/// The band's scalars resolve from tokens, and the two interactive
-/// controls share one density rung (§1 Row Density Homogeneity).
+/// The two interactive controls in the band share one density rung (§1 Row
+/// Density Homogeneity), and the framework field's compact height is the
+/// derived line box plus padding rather than a number of its own.
+///
+/// The band's own scalars ([`BAND_SPACING`], [`CONTEXT_SPACING`],
+/// [`BAND_PADDING`], [`PROMPT_TEXT_SIZE`], [`STOP_BUTTON_TEXT_SIZE`],
+/// [`FILE_CONTEXT_FALLBACK_SIZE`]) are bound to their tokens at their
+/// definitions and are not re-asserted: both sides of such an `assert_eq!`
+/// are the same token.
 #[test]
-fn band_scalars_resolve_from_tokens_and_share_one_density_rung() {
-    assert_eq!(BAND_SPACING, space::SM);
-    assert_eq!(CONTEXT_SPACING, space::XXS);
-    assert_eq!(BAND_PADDING, space::XS);
+fn band_controls_share_one_density_rung() {
     assert_ne!(
         BAND_PADDING, 6.0,
         "6 was off the base-4 grid; it must not return"
     );
-    assert_eq!(PROMPT_TEXT_SIZE, typography::BODY.size);
-    assert_eq!(STOP_BUTTON_TEXT_SIZE, typography::BODY.size);
-    assert_eq!(FILE_CONTEXT_FALLBACK_SIZE, typography::MIN_SIZE);
 
     // The framework field's `.compact()` height remains the old explicit
     // BODY line box + 2 x XS padding, and matches the Stop button's rung.

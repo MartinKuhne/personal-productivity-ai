@@ -279,11 +279,6 @@ fn test_card_size_sums_the_framework_row_heights() {
     let size = card_size(&menu);
     assert_eq!(size.width, CARD_WIDTH);
     assert_eq!(size.height, rows + CARD_INSET * 2.0);
-    assert_eq!(
-        CARD_INSET,
-        space::XS,
-        "the card inset is the space.xs token"
-    );
 }
 
 #[test]

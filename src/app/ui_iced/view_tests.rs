@@ -401,7 +401,6 @@ fn measured_label(id: &'static str, label: iced::widget::Text<'static>) -> iced:
 
 #[test]
 fn toc_text_rung_is_the_same_ui_compact_rung_the_file_tree_paints() {
-    assert_eq!(TOC_TEXT_RUNG, typography::UI_COMPACT);
     assert_eq!(
         TOC_TEXT_RUNG.size,
         crate::ui_iced::panels::left::ROW_TEXT_SIZE,

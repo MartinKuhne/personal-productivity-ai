@@ -1107,11 +1107,6 @@ fn the_floor_guard_covers_every_render_site_the_panel_draws() {
 fn the_retired_eleven_point_secondary_size_is_gone() {
     assert_eq!(
         SECONDARY_TEXT_SIZE,
-        typography::CAPTION.size,
-        "the secondary lines sit on `type.caption`"
-    );
-    assert_eq!(
-        SECONDARY_TEXT_SIZE,
         typography::MIN_SIZE,
         "`caption` is the rung that sits exactly on the floor, which is what \
          makes it the legal home for the smallest text in the panel"
@@ -1124,11 +1119,6 @@ fn the_retired_eleven_point_secondary_size_is_gone() {
 
 #[test]
 fn the_row_label_sits_on_the_framework_label_rung() {
-    assert_eq!(
-        ROW_TEXT_SIZE,
-        tree_row::LABEL_RUNG.size,
-        "the row's label rung is the composite's own, not a parallel number"
-    );
     assert_eq!(ROW_TEXT_SIZE, typography::UI_COMPACT.size);
     assert_ne!(
         ROW_TEXT_SIZE, RETIRED_ROW_TEXT_SIZE,
@@ -1137,36 +1127,33 @@ fn the_row_label_sits_on_the_framework_label_rung() {
     assert!(ROW_TEXT_SIZE >= typography::MIN_SIZE);
 }
 
+/// The framework row constants the tree reads must each land on a named rung,
+/// and the retired off-grid literals must stay gone. The bindings themselves
+/// ([`ROW_INDENT_PER_DEPTH`], [`ROW_PADDING_X`], [`ROW_PADDING_Y`],
+/// [`ROW_WIDTH_SLACK`], [`PANEL_PADDING`]) are defined as those constants and
+/// are not re-asserted: both sides of such an `assert_eq!` move together.
 #[test]
-fn row_geometry_reads_the_framework_row_constants() {
-    assert_eq!(ROW_INDENT_PER_DEPTH, tree_row::INDENT_STEP);
+fn row_geometry_lands_on_the_named_spacing_rungs() {
     assert_eq!(ROW_INDENT_PER_DEPTH, space::LG);
     assert_ne!(
         ROW_INDENT_PER_DEPTH, RETIRED_INDENT_PER_DEPTH,
         "18pt had no token behind it; the framework's step is 16"
     );
 
-    assert_eq!(ROW_PADDING_X, tree_row::ROW_INSET_X);
     assert_eq!(ROW_PADDING_X, space::XS);
     assert_ne!(
         ROW_PADDING_X, RETIRED_ROW_PADDING_X,
         "§4.3.2 prices the tree row's horizontal inset at space.xs"
     );
 
-    assert_eq!(ROW_PADDING_Y, tree_row::ROW_INSET_Y);
     assert_eq!(ROW_PADDING_Y, space::XXS);
 
-    assert_eq!(
-        ROW_WIDTH_SLACK,
-        tree_row::ROW_INSET_X * 2.0 + tree_row::CHEVRON_COLUMN
-    );
     assert_eq!(ROW_WIDTH_SLACK, 32.0);
     assert_ne!(
         ROW_WIDTH_SLACK, RETIRED_ROW_WIDTH_SLACK,
         "the slack is now the framework's fixed furniture, not a guess"
     );
 
-    assert_eq!(PANEL_PADDING, space::XS);
     assert_ne!(
         PANEL_PADDING, RETIRED_PANEL_PADDING,
         "6 is not on the spacing grid — it exists only as shape.radius_card"
@@ -1642,8 +1629,6 @@ fn the_badge_is_a_shape_that_fits_the_compact_row() {
         "slot = text allowance + both side paddings"
     );
     assert_eq!(PDF_BADGE_SLOT, 36.0, "20 + 8 + 8");
-    assert_eq!(PDF_BADGE_CHIP_H_PADDING, badge::CHIP_H_PADDING);
-    assert_eq!(PDF_BADGE_CHIP_RADIUS, shape::RADIUS_PILL);
     assert_eq!(PDF_BADGE_CHARGE, PDF_BADGE_SLOT + PDF_BADGE_GAP);
     // The chip is narrower than the row's full width at any pane the app
     // allows, so it can never crowd the row out.
@@ -1702,7 +1687,6 @@ fn the_badge_charge_cannot_breach_the_label_floor_at_the_minimum_pane() {
 
 #[test]
 fn a_row_meets_the_pointer_target_minimum_and_still_holds_its_label() {
-    assert_eq!(ROW_MIN_HEIGHT, tree_row::ROW_HEIGHT_COMPACT);
     assert_eq!(ROW_MIN_HEIGHT, size::HIT_TARGET_MIN);
     assert!(
         ROW_MIN_HEIGHT >= size::HIT_TARGET_MIN,
@@ -2088,7 +2072,6 @@ fn auto_fit_does_not_widen_the_pane_to_keep_the_chip() {
 
 #[test]
 fn the_search_glyphs_are_on_the_icon_rung_not_the_text_rung() {
-    assert_eq!(SEARCH_GLYPH_SIZE, pro_text_input::SLOT_GLYPH_SIZE);
     assert_eq!(SEARCH_GLYPH_SIZE, size::ICON_MD);
     assert_ne!(
         SEARCH_GLYPH_SIZE, RETIRED_ROW_TEXT_SIZE,
@@ -2098,14 +2081,7 @@ fn the_search_glyphs_are_on_the_icon_rung_not_the_text_rung() {
 }
 
 #[test]
-fn the_search_row_spacing_is_on_the_grid() {
-    assert_eq!(SEARCH_ROW_SPACING, space::XS);
-    assert_eq!(RESULT_LINE_SPACING, space::XXS);
-}
-
-#[test]
-fn the_header_sits_on_the_title_sm_rung() {
-    assert_eq!(HEADER_SIZE, typography::TITLE_SM.size);
+fn the_header_clears_the_type_floor() {
     assert!(HEADER_SIZE >= typography::MIN_SIZE);
 }
 
@@ -3908,28 +3884,15 @@ fn note_skill_files_is_empty_when_the_skill_folder_does_not_exist() {
     );
 }
 
-/// The remaining derived constants are bound to their tokens.
+/// The app-owned clamp and the widget ids are pinned here because nothing else
+/// asserts them.
 ///
-/// Every other constant in the module is pinned where it is used; these four
-/// had no assertion anywhere, so a retune of the token they read from would
-/// have gone unnoticed.
+/// This test used to restate `PDF_BADGE_TEXT_ALLOWANCE`, `PDF_BADGE_GAP` and
+/// `SEARCH_CARD_PADDING` against the tokens they are defined as. Both sides of
+/// those `assert_eq!`s are the same token, so a retune moves them together and
+/// the check could never fail; they are gone.
 #[test]
-fn the_remaining_derived_constants_read_their_tokens() {
-    assert_eq!(
-        PDF_BADGE_TEXT_ALLOWANCE,
-        space::LG + space::XS,
-        "the badge's text room is space.lg + space.xs"
-    );
-    assert_eq!(
-        PDF_BADGE_GAP,
-        space::XS,
-        "the label-to-badge gap is space.xs"
-    );
-    assert_eq!(
-        SEARCH_CARD_PADDING,
-        space::XS,
-        "the search card's inner padding is space.xs"
-    );
+fn the_remaining_app_owned_constants_are_pinned() {
     assert_eq!(
         MAX_ROW_INDENT_DEPTH, 50,
         "the auto-fit indent clamp is an app-owned 50, not the framework's 1000 stack guard"

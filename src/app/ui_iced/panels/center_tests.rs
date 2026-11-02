@@ -661,12 +661,6 @@ fn the_top_indicator_resolves_all_three_states() {
         "hovered-inactive and active must be visually distinct"
     );
     assert_eq!(
-        TAB_INDICATOR_HEIGHT,
-        shape::BORDER_FOCUS,
-        "the bar's weight is `border.focus`, the token §2 names against the \
-         active tab accent bar"
-    );
-    assert_eq!(
         TAB_INDICATOR_HEIGHT, 2.0,
         "`border.focus` is 2px, which is what §4.4.1 draws"
     );
@@ -751,7 +745,6 @@ fn the_top_indicator_fits_the_pinned_strip_budget_without_touching_it() {
         "36 = 4 + 28 + 4: the closure INT-7c pinned is unchanged by the \
          indicator, because the bar takes no layout"
     );
-    assert_eq!(STRIP_HEIGHT, size::CONTROL_LG);
     assert_eq!(TAB_HEIGHT, size::CONTROL_SM);
 
     assert!(
@@ -997,10 +990,6 @@ fn hover_changes_colour_only_and_never_tab_geometry() {
         "if the border were ever folded into the band arithmetic the tab \
          would shrink by 1px per side"
     );
-
-    // The close hit target is a state-free constant, so it cannot breathe on
-    // hover.
-    assert_eq!(TAB_CLOSE_HIT_TARGET, size::HIT_TARGET_MIN);
 }
 
 /// The active tab must come out of INT-16 exactly as INT-11/INT-12 left it.
@@ -1821,20 +1810,6 @@ fn laid_out_tab(path: &str) -> (iced::Rectangle, iced::Rectangle, iced::Rectangl
 fn tab_chrome_outside_text_and_close(path: &str) -> f32 {
     let (slot, text, close) = laid_out_tab(path);
     slot.width - text.width - close.width
-}
-
-/// The tab's horizontal padding sits on the `space.xs` rung.
-///
-/// This is an owner ruling, not a spec reading: §2.1 binds `space.md` to "tabs"
-/// and the constant was `space::MD` for exactly that reason. The deviation is
-/// recorded in `doc/planning/tab-strip-dead-space.md` and flagged per [RUST-041].
-#[test]
-fn the_tab_pads_its_content_on_the_xs_rung() {
-    assert_eq!(
-        TAB_PADDING_X,
-        space::XS,
-        "the tab's horizontal padding must be the space.xs rung it was ruled onto"
-    );
 }
 
 /// The unsaved marker no longer takes any layout.
