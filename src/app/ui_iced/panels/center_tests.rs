@@ -1858,6 +1858,18 @@ fn the_tab_title_starts_at_its_padding_alone() {
     );
 }
 
+#[test]
+fn the_tab_close_button_is_a_compact_square_target() {
+    let (_slot, _text, close) = laid_out_tab("docs/notes.md");
+    assert_eq!(
+        (close.width, close.height),
+        (TAB_CLOSE_HIT_TARGET, TAB_CLOSE_HIT_TARGET),
+        "tab close button must be a compact square target (24x24), got {}x{}",
+        close.width,
+        close.height
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The viewer area and the agent-session band (the two branches the panel
 // routes between below the strip)

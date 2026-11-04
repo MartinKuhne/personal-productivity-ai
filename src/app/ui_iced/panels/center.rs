@@ -1318,19 +1318,21 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
         .font(tab_label_font(tab.active))
         .color(tab_text_color(&palette, tab.active, hovered));
 
-    // iced's `Button` lays its content at the top-left of its padding box, so
-    // the glyph is centred by the container that fills the hit target.
-    let close = Button::icon_only(
-        ButtonVariant::Ghost,
-        text(strings::ICON_X)
-            .font(phosphor_font())
-            .size(TAB_CLOSE_GLYPH_SIZE),
-        tab_close_message(index),
-        format!("tab_close_{}", index),
-        strings::CLOSE_TAB_TOOLTIP,
+    let close = container(
+        Button::icon_only(
+            ButtonVariant::Ghost,
+            text(strings::ICON_X)
+                .font(phosphor_font())
+                .size(TAB_CLOSE_GLYPH_SIZE),
+            tab_close_message(index),
+            format!("tab_close_{}", index),
+            strings::CLOSE_TAB_TOOLTIP,
+        )
+        .compact()
+        .palette(Palette::pro()),
     )
-    .compact()
-    .palette(Palette::pro());
+    .width(Length::Fixed(TAB_CLOSE_HIT_TARGET))
+    .height(Length::Fixed(TAB_CLOSE_HIT_TARGET));
 
     let surface = container(
         Row::with_children(vec![label.into(), close.into()])

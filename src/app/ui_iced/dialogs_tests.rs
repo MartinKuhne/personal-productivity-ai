@@ -320,7 +320,8 @@ fn open_move_carries_its_destinations() {
             path: sample_file()
         })
     );
-    assert_eq!(state.destinations(), dests.as_slice());
+    let expected: Vec<MoveDestination> = dests.into_iter().map(Into::into).collect();
+    assert_eq!(state.destinations(), expected.as_slice());
     assert_eq!(state.selected_destination(), None);
 }
 

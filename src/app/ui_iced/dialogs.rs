@@ -350,7 +350,7 @@ impl DialogKind {
                 folders: state
                     .destinations()
                     .iter()
-                    .map(|folder| folder.to_string_lossy().into_owned())
+                    .map(|dest| dest.label.clone())
                     .collect(),
                 selected: state.selected_index(),
             },
@@ -436,6 +436,43 @@ pub enum SubmitOutcome {
     },
 }
 
+/// One selectable destination folder in the move dialog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MoveDestination {
+    /// Absolute filesystem path to move into.
+    pub path: PathBuf,
+    /// Virtual display label shown in the UI.
+    pub label: String,
+}
+
+impl MoveDestination {
+    /// Creates a new destination entry with a real path and a virtual display label.
+    #[must_use]
+    pub fn new(path: PathBuf, label: impl Into<String>) -> Self {
+        Self {
+            path,
+            label: label.into(),
+        }
+    }
+}
+
+impl From<PathBuf> for MoveDestination {
+    fn from(path: PathBuf) -> Self {
+        let label = path.to_string_lossy().into_owned();
+        Self { path, label }
+    }
+}
+
+impl From<&PathBuf> for MoveDestination {
+    fn from(path: &PathBuf) -> Self {
+        let label = path.to_string_lossy().into_owned();
+        Self {
+            path: path.clone(),
+            label,
+        }
+    }
+}
+
 /// The small-dialog state model behind the name-entry / move / delete
 /// dialogs.
 ///
@@ -446,7 +483,7 @@ pub struct DialogState {
     open: Option<DialogKind>,
     field: TextInputModel,
     error: Option<String>,
-    destinations: Vec<PathBuf>,
+    destinations: Vec<MoveDestination>,
     selected_destination: Option<PathBuf>,
 }
 
@@ -495,7 +532,7 @@ impl DialogState {
 
     /// The move dialog's destination candidates.
     #[must_use]
-    pub fn destinations(&self) -> &[PathBuf] {
+    pub fn destinations(&self) -> &[MoveDestination] {
         &self.destinations
     }
 
@@ -512,7 +549,7 @@ impl DialogState {
     pub fn selected_index(&self) -> usize {
         self.destinations
             .iter()
-            .position(|folder| Some(folder.as_path()) == self.selected_destination.as_deref())
+            .position(|dest| Some(dest.path.as_path()) == self.selected_destination.as_deref())
             .unwrap_or(0)
     }
 
@@ -538,10 +575,14 @@ impl DialogState {
     ///
     /// The candidate list is data the pure view cannot build itself: the
     /// reducer snapshots the destinations and hands them in on open.
-    pub fn open_move(&mut self, path: PathBuf, destinations: Vec<PathBuf>) {
+    pub fn open_move<I, D>(&mut self, path: PathBuf, destinations: I)
+    where
+        I: IntoIterator<Item = D>,
+        D: Into<MoveDestination>,
+    {
         *self = Self {
             open: Some(DialogKind::Move { path }),
-            destinations,
+            destinations: destinations.into_iter().map(Into::into).collect(),
             ..Self::default()
         };
         self.refresh_validation();
@@ -1074,9 +1115,9 @@ fn move_card<'a>(state: &'a DialogState, intent: ButtonIntent) -> Element<'a, Me
         state
             .destinations()
             .iter()
-            .fold(Column::<Message>::new().spacing(0.0), |rows, folder| {
-                let selected = state.selected_destination() == Some(folder.as_path());
-                rows.push(destination_row(folder, selected))
+            .fold(Column::<Message>::new().spacing(0.0), |rows, dest| {
+                let selected = state.selected_destination() == Some(dest.path.as_path());
+                rows.push(destination_row(&dest.path, &dest.label, selected))
             });
     // Content-sized up to the §4.5.1 maximum, so a three-destination move
     // dialog is a three-row list rather than a 200px box with two rows in
@@ -1099,10 +1140,10 @@ fn move_card<'a>(state: &'a DialogState, intent: ButtonIntent) -> Element<'a, Me
 
 /// One selectable destination row: the picked row carries the accent
 /// background, a press emits [`DialogMessage::DestinationSelected`].
-fn destination_row(folder: &Path, selected: bool) -> Element<'_, Message> {
+fn destination_row<'a>(folder: &'a Path, label: &'a str, selected: bool) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
-    let label = text(folder.to_string_lossy()).size(DIALOG_BODY_SIZE);
+    let label = text(label).size(DIALOG_BODY_SIZE);
     let surface = container(label)
         .width(Length::Fill)
         .height(Length::Fixed(MOVE_ROW_HEIGHT))

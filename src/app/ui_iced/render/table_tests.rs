@@ -287,6 +287,22 @@ fn test_table_widget_builds_for_a_normal_table() {
 }
 
 #[test]
+fn test_table_widget_shrink_wraps_when_narrower_than_viewport() {
+    let cells = table_cells("| A | B |\n|---|---|\n| 1 | 2 |\n");
+    let viewport = Size::new(1000.0, 600.0);
+    let model = solve(&cells, viewport.width);
+    assert!(!model.needs_horizontal_scroll);
+    let hits = measure(table_widget(&model), viewport);
+    let frame_width = hits.containers[0].width;
+    let expected_width = natural_table_width(&model);
+    assert!(
+        (frame_width - expected_width).abs() < 1.0,
+        "boundary box must shrink-wrap table content (expected ~{expected_width}px, got {frame_width}px, viewport {}px)",
+        viewport.width
+    );
+}
+
+#[test]
 fn test_table_widget_builds_for_the_scroll_fallback() {
     let model = solve(&grid(2, 4), 20.0);
     assert!(model.needs_horizontal_scroll);

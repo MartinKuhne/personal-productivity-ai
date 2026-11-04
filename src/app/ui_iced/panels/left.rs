@@ -1854,16 +1854,20 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
             label
         };
 
-    let row_surface = container(content)
+    let min_content_height =
+        (row_box.height - row_box.padding.top - row_box.padding.bottom).max(0.0);
+    let bounded_content = Row::with_children(vec![
+        container(content).width(Length::Fill).into(),
+        Space::new()
+            .height(Length::Fixed(min_content_height))
+            .into(),
+    ])
+    .width(Length::Fill)
+    .align_y(Alignment::Center);
+
+    let row_surface = container(bounded_content)
         .width(Length::Fill)
-        // iced 0.14's `Container` has no `min_height`, so the compact
-        // rung is applied as a fixed height. That is not a downgrade
-        // here: the row's content is one single-line label on an 18pt
-        // line box plus 2pt insets = 22pt, always shorter than the 24pt
-        // rung, so "fixed at the rung" and "at least the rung" are the
-        // same set of layouts. `align_y` keeps the label centred in the
-        // 2pt of slack instead of parked against the top edge.
-        .height(Length::Fixed(row_box.height))
+        .height(Length::Shrink)
         .align_y(Alignment::Center)
         .padding(row_box.padding)
         // The band is painted whenever the resolved style actually has
@@ -1918,15 +1922,15 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
 
     let mut layers = vec![base];
     if let Some(bar) = overlay.selection_bar {
-        layers.push(stripe_element(bar, row_box.height));
+        layers.push(stripe_element(bar, Length::Fill));
     }
     for guide in &overlay.guides {
-        layers.push(stripe_element(*guide, row_box.height));
+        layers.push(stripe_element(*guide, Length::Fill));
     }
 
     Stack::with_children(layers)
         .width(Length::Fill)
-        .height(Length::Fixed(row_box.height))
+        .height(Length::Shrink)
         .into()
 }
 
@@ -2164,10 +2168,10 @@ pub fn row_overlay(depth: usize, row_width: f32, selected: bool, hovered: bool) 
 /// by padding inside something that spans the row. A stripe at `x = 0` — the
 /// selection bar — skips the wrapper, which is why the bar costs one widget and
 /// a guide costs two.
-fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
+fn stripe_element(stripe: RowStripe, height: Length) -> Element<'static, Message> {
     let bar = container(Space::new())
         .width(Length::Fixed(stripe.width))
-        .height(Length::Fixed(height))
+        .height(height)
         .style(move |_theme| container::Style {
             background: Some(Background::Color(stripe.color)),
             ..container::Style::default()
@@ -2179,7 +2183,7 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 
     container(bar)
         .width(Length::Fill)
-        .height(Length::Fixed(height))
+        .height(height)
         .padding(Padding {
             top: 0.0,
             right: 0.0,

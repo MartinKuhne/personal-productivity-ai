@@ -80,7 +80,7 @@ use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
 use crate::ui_iced::app::{AppState, ContextMenu, OverlayState, TooltipId, guard_editor_leave};
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, index_of_selected};
 use crate::ui_iced::context_menu::ContextTarget;
-use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
+use crate::ui_iced::dialogs::{DialogKind, MoveDestination, SubmitOutcome};
 use crate::ui_iced::editor::{self, EditorViewModel, LeaveGesture, apply_editor_message};
 use crate::ui_iced::hamburger::{command_for_activation, hamburger_menu};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
@@ -856,14 +856,19 @@ fn open_editor_from_buffer(state: &mut AppState, path: &Path) {
 ///
 /// Built from the flattened row snapshot, so collapsed directories are
 /// excluded.
-fn visible_directories(state: &AppState) -> Vec<PathBuf> {
+fn visible_directories(state: &AppState) -> Vec<MoveDestination> {
+    let libraries = state.app.content_libraries();
     state
         .models
         .left
         .rows
         .iter()
         .filter(|row| row.is_dir)
-        .map(|row| row.path.clone())
+        .map(|row| {
+            let label = crate::config::library_display_label(libraries, &row.path)
+                .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
+            MoveDestination::new(row.path.clone(), label)
+        })
         .collect()
 }
 
@@ -2121,8 +2126,10 @@ fn reduce_search(state: &mut AppState, message: SearchMessage) -> Vec<Task<Messa
 fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
     let all_files = state.app.orchestrator.workspace.all_files.clone();
     let libraries = state.app.content_libraries().to_vec();
-    let allowed: std::collections::HashSet<PathBuf> =
-        visible_directories(state).into_iter().collect();
+    let allowed: std::collections::HashSet<PathBuf> = visible_directories(state)
+        .into_iter()
+        .map(|dest| dest.path)
+        .collect();
     let term_lower = term.to_lowercase();
 
     Task::perform(

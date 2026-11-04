@@ -3480,8 +3480,8 @@ fn a_stripe_at_the_left_edge_skips_the_offset_wrapper_and_an_offset_one_uses_it(
         color: iced::Color::BLACK,
     };
 
-    let _bar_element = stripe_element(bar, ROW_MIN_HEIGHT);
-    let _guide_element = stripe_element(guide, ROW_MIN_HEIGHT);
+    let _bar_element = stripe_element(bar, Length::Fixed(ROW_MIN_HEIGHT));
+    let _guide_element = stripe_element(guide, Length::Fixed(ROW_MIN_HEIGHT));
 
     // The asymmetry the wrapper exists to create, pinned on the data the
     // builder consumes rather than on the widgets it produces.
@@ -3901,4 +3901,79 @@ fn the_remaining_app_owned_constants_are_pinned() {
     assert_eq!(SEARCH_TRIGGER_FOCUS_ID, "left_search_trigger");
     assert_eq!(SEARCH_CLEAR_FOCUS_ID, "left_search_clear");
     assert_eq!(NOTE_SKILLS_SUBDIR, "Note");
+}
+
+use iced_test::selector::Candidate;
+
+type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
+
+/// Lays `element` out in a window of `size`, headless.
+fn laid_out(size: iced::Size, element: iced::Element<'_, Message>) -> Sim<'_> {
+    iced_test::Simulator::with_size(iced_test::core::Settings::default(), size, element)
+}
+
+#[test]
+fn narrow_tree_view_with_wrapping_text_expands_row_height_without_overlap() {
+    let long_name = "very long file name that wraps onto multiple lines in a narrow view.md";
+    let row1 = file_row(long_name, "/work/a.md", 0);
+    let row2 = file_row("short.md", "/work/b.md", 0);
+    let mut vm = snapshot(vec![row1, row2]);
+    let narrow_width = 80.0;
+    vm.row_width = narrow_width;
+
+    let element: Element<'_, Message> =
+        Column::with_children(vec![tree_row(&vm.rows[0], &vm), tree_row(&vm.rows[1], &vm)]).into();
+
+    let mut ui = laid_out(iced::Size::new(narrow_width, 600.0), element);
+
+    let mut texts: Vec<(String, iced::Rectangle)> = Vec::new();
+    let _ = ui.find(|candidate: Candidate<'_>| {
+        if let Candidate::Text {
+            content, bounds, ..
+        } = candidate
+        {
+            texts.push((content.to_string(), bounds));
+        }
+        None::<()>
+    });
+
+    assert_eq!(texts.len(), 2, "must find 2 text labels in the tree");
+    let (_, text1_bounds) = texts[0].clone();
+    let (_, text2_bounds) = texts[1].clone();
+
+    assert!(
+        text1_bounds.height > tree_row::LABEL_RUNG.line_height,
+        "long text should wrap and have height > 1 line ({}), got {}",
+        tree_row::LABEL_RUNG.line_height,
+        text1_bounds.height
+    );
+
+    assert!(
+        text2_bounds.y >= text1_bounds.y + text1_bounds.height,
+        "text must not render on top of text: row 2 text starts at y={} but row 1 text ends at y={}",
+        text2_bounds.y,
+        text1_bounds.y + text1_bounds.height
+    );
+}
+
+#[test]
+fn single_line_tree_row_keeps_minimum_height_floor() {
+    let row = file_row("short.md", "/work/a.md", 0);
+    let vm = snapshot(vec![row]);
+    let element: Element<'_, Message> = tree_row(&vm.rows[0], &vm);
+    let mut ui = laid_out(iced::Size::new(400.0, 600.0), element);
+
+    let mut row_height = 0.0;
+    let _ = ui.find(|candidate: Candidate<'_>| {
+        if let Candidate::Container { bounds, .. } = candidate {
+            if bounds.height > row_height {
+                row_height = bounds.height;
+            }
+        }
+        None::<()>
+    });
+    assert!(
+        (row_height - ROW_MIN_HEIGHT).abs() < f32::EPSILON,
+        "single-line row must have ROW_MIN_HEIGHT ({ROW_MIN_HEIGHT}), got {row_height}"
+    );
 }

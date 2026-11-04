@@ -273,7 +273,11 @@ pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
     };
 
     container(framed)
-        .width(Length::Fill)
+        .width(if model.needs_horizontal_scroll {
+            Length::Fill
+        } else {
+            Length::Shrink
+        })
         .style(move |_theme| container::Style {
             border: iced::Border {
                 color: palette.border_strong,

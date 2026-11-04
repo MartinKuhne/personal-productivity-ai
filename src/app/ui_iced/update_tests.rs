@@ -606,8 +606,44 @@ fn test_move_dialog_gets_the_visible_directories_as_destinations() {
 
     assert_eq!(
         state.overlay.dialog.destinations(),
-        &[PathBuf::from("/notes/work")],
+        &[MoveDestination::from(PathBuf::from("/notes/work"))],
         "only directory rows are move destinations"
+    );
+}
+
+#[test]
+fn test_move_dialog_shows_virtual_paths_for_destinations() {
+    let (mut state, _storage) = fresh_state();
+    state.app.orchestrator.content_libraries = vec![ContentLibrary {
+        name: "Notes".to_string(),
+        root_folder: "/notes".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+    seed_rows(
+        &mut state,
+        vec![dir_row("/notes/work"), file_row("/notes/a.md")],
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::Move(PathBuf::from("/notes/a.md"))),
+    );
+
+    let control = state
+        .overlay
+        .dialog
+        .kind()
+        .unwrap()
+        .input_control(&state.overlay.dialog);
+    let hoarfrost::surface::input_dialog::InputControl::FolderList { folders, .. } = control else {
+        panic!("expected folder list");
+    };
+    assert_eq!(
+        folders,
+        vec!["Notes/work".to_string()],
+        "move dialog destination list must display virtual paths instead of real paths"
     );
 }
 
