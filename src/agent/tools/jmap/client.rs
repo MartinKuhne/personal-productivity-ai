@@ -7,10 +7,13 @@
 //! - Method-level error handling: Section 3.6.2
 //!
 //! See: <https://www.rfc-editor.org/rfc/rfc8620>
+//!
+//! Unit tests live in the sibling `client_tests.rs` sidecar.
 
 use std::collections::HashMap;
 
 use crate::config::JmapClient;
+use crate::strings::ERR_JMAP_JSON_PARSE_PREFIX;
 
 /// Attempt to extract a human-readable error detail from a response body.
 ///
@@ -33,6 +36,27 @@ fn parse_error_detail(body: &str) -> Option<String> {
         (Some(typ), _, _, _) => Some(typ.to_string()),
         _ => None,
     }
+}
+
+/// Maximum number of bytes of an unexpected response body that an error message
+/// echoes back.
+const MAX_ERROR_SNIPPET_BYTES: usize = 500;
+
+/// Clip `body` to [`MAX_ERROR_SNIPPET_BYTES`] and mark the cut with an ellipsis.
+///
+/// The cut is moved back to the nearest `char` boundary: `str` is indexed by
+/// byte, so a plain `&body[..500]` panics whenever byte 500 falls inside a
+/// multi-byte UTF-8 character — and a server's error body is not under our
+/// control. Byte 0 is always a boundary, so the search always terminates.
+fn truncate_error_snippet(body: &str) -> String {
+    if body.len() <= MAX_ERROR_SNIPPET_BYTES {
+        return body.to_string();
+    }
+    let mut end = MAX_ERROR_SNIPPET_BYTES;
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &body[..end])
 }
 
 /// Opaque handle to a connected JMAP session.
@@ -157,11 +181,7 @@ impl JmapSession {
             let msg = match detail {
                 Some(ref d) => format!("Server returned {status}: {d}"),
                 None => {
-                    let snippet = if body.len() > 500 {
-                        format!("{}...", &body[..500])
-                    } else {
-                        body.clone()
-                    };
+                    let snippet = truncate_error_snippet(&body);
                     if snippet.is_empty() {
                         format!("Server returned {status} (empty body)")
                     } else {
@@ -171,6 +191,7 @@ impl JmapSession {
             };
             tracing::error!(
                 name = "jmap.post.http_error",
+                error_code = "JMAP-4001",
                 status = %status.as_u16(),
                 body = %body,
                 "JMAP POST returned non-success HTTP status"
@@ -179,18 +200,15 @@ impl JmapSession {
         }
 
         let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-            let snippet = if body.len() > 500 {
-                format!("{}...", &body[..500])
-            } else {
-                body.clone()
-            };
+            let snippet = truncate_error_snippet(&body);
             tracing::error!(
                 name = "jmap.post.parse_error",
+                error_code = "JMAP-4002",
                 error = %e,
                 body = %snippet,
                 "Failed to parse JMAP response as JSON"
             );
-            format!("Failed to parse response as JSON: {e}: {snippet}")
+            format!("{ERR_JMAP_JSON_PARSE_PREFIX}: {e}: {snippet}")
         })?;
         Ok(json)
     }
@@ -235,180 +253,5 @@ pub fn jmap_check_errors(res: &serde_json::Value) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::{JmapSession, jmap_check_errors, parse_error_detail};
-    use crate::config::JmapClient;
-    use crate::tools::jmap::mock_server::spawn_mock_server;
-
-    #[test]
-    fn test_jmap_check_errors_no_errors() {
-        let res = json!({
-            "methodResponses": [
-                ["Email/get", { "list": [] }, "0"]
-            ]
-        });
-        assert_eq!(jmap_check_errors(&res), None);
-    }
-
-    #[test]
-    fn test_jmap_check_errors_with_description() {
-        let res = json!({
-            "methodResponses": [
-                ["error", { "type": "unknownMethod", "description": "The method is unknown" }, "call-1"]
-            ]
-        });
-        assert_eq!(
-            jmap_check_errors(&res),
-            Some("type: unknownMethod: The method is unknown (callId: call-1)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_jmap_check_errors_without_description() {
-        let res = json!({
-            "methodResponses": [
-                ["error", { "type": "invalidArguments" }, "call-2"]
-            ]
-        });
-        assert_eq!(
-            jmap_check_errors(&res),
-            Some("type: invalidArguments (callId: call-2)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_jmap_check_errors_missing_method_responses() {
-        let res = json!({ "session": "something" });
-        assert_eq!(jmap_check_errors(&res), None);
-    }
-
-    #[test]
-    fn test_jmap_check_errors_multiple_responses_one_error() {
-        let res = json!({
-            "methodResponses": [
-                ["Email/get", { "list": [] }, "0"],
-                ["error", { "type": "accountNotFound" }, "1"]
-            ]
-        });
-        assert_eq!(
-            jmap_check_errors(&res),
-            Some("type: accountNotFound (callId: 1)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_error_detail_rfc7807_detail_wins() {
-        let body = r#"{"type":"about:blank","title":"Bad Thing","detail":"The specific problem","status":400}"#;
-        assert_eq!(
-            parse_error_detail(body),
-            Some("The specific problem".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_error_detail_falls_back_to_title() {
-        let body = r#"{"type":"about:blank","title":"A title","status":500}"#;
-        assert_eq!(parse_error_detail(body), Some("A title".to_string()));
-    }
-
-    #[test]
-    fn test_parse_error_detail_jmap_type_and_description() {
-        let body = r#"{"type":"invalidArguments","description":"arg was wrong"}"#;
-        assert_eq!(
-            parse_error_detail(body),
-            Some("invalidArguments: arg was wrong".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_error_detail_jmap_type_only() {
-        let body = r#"{"type":"accountNotFound"}"#;
-        assert_eq!(
-            parse_error_detail(body),
-            Some("accountNotFound".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_error_detail_non_json_returns_none() {
-        assert_eq!(parse_error_detail("this is not json"), None);
-    }
-
-    #[test]
-    fn test_parse_error_detail_non_object_returns_none() {
-        assert_eq!(parse_error_detail(r#"["an","array"]"#), None);
-        assert_eq!(parse_error_detail(r#"42"#), None);
-    }
-
-    #[test]
-    fn test_parse_error_detail_empty_object_returns_none() {
-        assert_eq!(parse_error_detail(r#"{}"#), None);
-    }
-
-    #[test]
-    fn test_jmap_connect_failure_returns_error() {
-        let cfg = JmapClient {
-            url: "http://127.0.0.1:1".to_string(),
-            token: "token".to_string(),
-        };
-        let result = JmapSession::connect(&cfg);
-        assert!(result.is_err());
-        let err = result.err().unwrap();
-        assert!(err.contains("Failed to connect to JMAP server"));
-    }
-
-    #[test]
-    fn test_jmap_post_happy_path_via_mock_server() {
-        let body = json!({
-            "apiUrl": "{API_URL}",
-            "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
-            "methodResponses": [
-                ["Email/get", {"list": [{"id": "e1"}]}, "0"]
-            ]
-        })
-        .to_string();
-        let url = spawn_mock_server(body);
-        let cfg = JmapClient {
-            url,
-            token: "token".to_string(),
-        };
-        let session = JmapSession::connect(&cfg).expect("connect should succeed");
-        let response = session
-            .post(
-                &["urn:ietf:params:jmap:mail"],
-                json!([["Email/get", {"ids": ["e1"]}, "0"]]),
-            )
-            .expect("post should succeed");
-        let list = response
-            .get("methodResponses")
-            .and_then(|mr| mr.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|first| first.as_array())
-            .and_then(|arr| arr.get(1))
-            .and_then(|args| args.get("list"))
-            .and_then(|l| l.as_array());
-        assert_eq!(list.map(|l| l.len()), Some(1));
-    }
-
-    #[test]
-    fn test_jmap_account_id_resolves_from_mock() {
-        let body = json!({
-            "apiUrl": "{API_URL}",
-            "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"}
-        })
-        .to_string();
-        let url = spawn_mock_server(body);
-        let cfg = JmapClient {
-            url,
-            token: "token".to_string(),
-        };
-        let mut session = JmapSession::connect(&cfg).expect("connect should succeed");
-        assert_eq!(
-            session.account_id("urn:ietf:params:jmap:mail"),
-            "acc1".to_string()
-        );
-        assert_eq!(session.account_id("urn:ietf:params:jmap:mail"), "acc1");
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;

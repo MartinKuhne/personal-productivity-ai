@@ -18,89 +18,112 @@
 - [REQ-010] When the application starts for the first time, it SHALL display the `About` dialog.
 
 ### Concurrent Workspace Indexer Pipeline
-- [REQ-301]: When the application starts, the FastMD Viewer SHALL initialize a background directory crawler thread to recursively scan the workspace directory and populate a shared work queue with Markdown file paths.
-- [REQ-302]: The FastMD Viewer SHALL maintain a worker pool of up to four threads to read paths from the queue, parse YAML tags, and notify the GUI thread of results.
-- [REQ-303]: While background indexing is active, the FastMD Viewer SHALL display a loading spinner and the current file count in the top menu bar.
-- [REQ-304]: When index workers complete, the FastMD Viewer SHALL replace the loading spinner with the total file count and populate the tag combobox filter.
-- [REQ-305]: When index workers complete, the FastMD Viewer SHALL increase the width of the left column to accommodate the maximum file and directory name combination found.
+
+- [REQ-301] When the application starts, the FastMD Viewer SHALL initialize a background directory crawler thread to recursively scan all content libraries for markdown files, text files and PDF files.
+- [REQ-302] The FastMD Viewer SHALL maintain a worker pool of up to four threads to for background file scanning and processing.
+- [REQ-303] While background indexing is active, the FastMD Viewer SHALL display a loading spinner and the current file count in the top menu bar.
+- [REQ-304] When index workers complete, the FastMD Viewer SHALL replace the loading spinner with the total file count and populate the tag combobox filter.
+- [REQ-305] When index workers complete, the FastMD Viewer SHALL increase the width of the left column to accommodate the maximum file and directory name combination found.
+- [REQ-306] While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files scanned or every 5 seconds, reporting files processed, PDFs found, and conversions queued and completed.
+
+### System state
+
+- [REQ-320] When the directory crawler enumerates a directory, they shall emit a [DirectoryChanged] event
+- [REQ-321] The [DirectoryChanged] event shall have a [Path] property that contains the fully qualified path
+- [REQ-322] The [DirectoryChanged] event shall have a [Kind] property with values [Added, Deleted]
+
+- [REQ-330] When the directory crawler enumerates a file, they shall emit a [FileChanged] event
+- [REQ-331] The [FileChanged] event notifies about one or more file events by using a [Files] list
+- [REQ-332] The [FileChanged] event shall have a single [Kind] property with values [Added, Deleted, Changed]
+- [REQ-333] For each file, the [FileChanged] event shall have a [Path] property that contains the fully qualified path
+- [REQ-334] For each file, the [FileChanged] event shall have a [FileName] property that contains the file name
 
 ### Live Workspace File System Watcher
-- [REQ-401]: When the initial index completes, the FastMD Viewer SHALL schedule a background file system watcher that uses Windows file and directory change notifications.
-- [REQ-402]: When the file watcher receives a file create or modify event, the FastMD Viewer SHALL re-scan the document's YAML tags and update the tag list and directory tree.
-- [REQ-403]: When a file is deleted, the FastMD Viewer SHALL remove the document from the directory tree and from tag lists.
-- [REQ-404]: When a file is renamed, the FastMD Viewer SHALL treat the rename as a delete event followed by a create event.
-- [REQ-405]: When the active document is modified, the FastMD Viewer SHALL hot-reload and redraw the active document immediately.
-- [REQ-406]: If the active document is deleted, then the FastMD Viewer SHALL reset the viewer pane.
-- [REQ-407]: When a new directory is created, the FastMD Viewer SHALL start watching that directory recursively.
+- [REQ-401] For each content libray, the system SHALL maintain a file system watcher that recevies change notifications from the operating system
+- [REQ-402] The file watcher shall emit [DirectoryChanged] events
+- [REQ-403] The file watcher shall emit [FileChanged] events
+- [REQ-404] When a file is renamed, the FastMD Viewer SHALL treat the rename as a delete event followed by a create event.
+- [REQ-405] When the active document is modified, the FastMD Viewer SHALL hot-reload and redraw the active document immediately
+- [REQ-406] If the active document is deleted, then the FastMD Viewer SHALL reset the viewer pane
+- [REQ-407] When a new directory is created, the FastMD Viewer SHALL start watching that directory recursively
+
+### Tag management
+- [REQ-420] The tag manager shall maintain a list of unique tags known to the system. It acts as the single source of truth for that information
+- [REQ-421] The tag manager shall receive [FileChanged] events.
+- [REQ-422] When the tag manager receives a [FileChanged][Added] or [FileChanged][Changed] event, it shall read the tags from the yaml header of that file, and update the list of tags
+
+### Directory management
+- [REQ-430] The directory manager shall maintain a tree of unique directories known to the system
+- [REQ-431] The directory manager shall receive [DirectoryChanged] events
+- [REQ-432] When the directory manager receives a [DirectoryChanged] event, it shall update its tree of unique directories to the system
+
+### File management
+- [REQ-440] The file manager shall maintain a tree of files known to the system
+- [REQ-441] The file manager shall receive [FileChanged] events
+- [REQ-442] When the file manager receives a [FileChanged] event, it shall update it list of known files
 
 ### PDF Support
-- [REQ-450]: When initial indexing runs or when the file watcher receives a file system change notification, the FastMD Viewer SHALL scan all configured text libraries for files with the `.pdf` extension.
-- [REQ-451]: The FastMD Viewer SHALL NOT display PDF files in the directory tree or tab bar.
-- [REQ-451A]: The FastMD Viewer SHALL NOT expose PDF files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
-- [REQ-452]: When the FastMD Viewer discovers a PDF file, the FastMD Viewer SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
-- [REQ-453]: Where a Markdown file with the same stem exists, the FastMD Viewer SHALL render the corresponding Markdown file in a PDF-appropriate color in the tree.
-- [REQ-454]: If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, then the FastMD Viewer SHALL queue the PDF for conversion.
-- [REQ-455]: The FastMD Viewer SHALL run the PDF converter as a background process.
-- [REQ-455A]: When the PDF converter runs, the FastMD Viewer SHALL capture its stdout and stderr and write the output to the Background Process Log.
-- [REQ-455B]: Background processes spawned by the FastMD Viewer SHALL NOT create a visible console window on Windows. The `CREATE_NO_WINDOW` Win32 flag (0x08000000) MUST be applied to every child process spawned from a GUI-subsystem binary.
-- [REQ-456A]: If the PDF converter exits with code 0, then the FastMD Viewer SHALL allow the file watcher to pick up the generated Markdown file and SHALL index the file.
-- [REQ-456B]: If the PDF converter exits with a non-zero code, then the FastMD Viewer SHALL log the conversion error to the Background Process Log and SHALL NOT create the Markdown file.
-- [REQ-457]: While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files scanned or every 5 seconds, reporting files processed, PDFs found, and conversions queued and completed.
-- [REQ-458]: When the file watcher receives a file system change notification related to PDFs, the FastMD Viewer SHALL log the event type and virtual path to the Background Process Log.
-- [REQ-459]: The FastMD Viewer SHALL support a configuration key `pdf_converter_command` as an array of command and arguments that include `{input}` and `{output}` placeholders.
-- [REQ-459A]: When exporting Markdown to PDF, the FastMD Viewer SHALL use a base text size of 10pt, and heading sizes of 16pt (H1), 14pt (H2), and 12pt (H3).
+- [REQ-450] The PDF manager shall receive [FileChanged] events
+- [REQ-451] The PDF manager shall ignore events for files that do not have a  `.pdf` extension
+- [REQ-451A] The FastMD Viewer SHALL NOT expose PDF files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
+- [REQ-452] When the PDF manager recevies [FileChanged] events, it SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
+- [REQ-454] If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, and a PDF converter is configured, then the FastMD Viewer SHALL queue the PDF for conversion.
+- [REQ-455] The FastMD Viewer SHALL run the PDF converter as a background process.
+- [REQ-455A] When the PDF converter runs, the FastMD Viewer SHALL capture its stdout and stderr and write the output to the Background Process Log.
+- [REQ-455B] Background processes spawned by the FastMD Viewer SHALL NOT create a visible console window on Windows. On Windows, the `CREATE_NO_WINDOW` Win32 flag (0x08000000) MUST be applied to every child process spawned from a GUI-subsystem binary.
+- [REQ-456A] If the PDF converter exits with code 0, then the FastMD Viewer SHALL allow the file watcher to pick up the generated Markdown file and SHALL index the file
+- [REQ-456B] If the PDF converter exits with a non-zero code, then the FastMD Viewer SHALL log the conversion error to the Background Process Log and SHALL NOT create the Markdown file
+- [REQ-459] The FastMD Viewer SHALL support a configuration key `pdf_converter_command` as an array of command and arguments that include `{input}` and `{output}` placeholders
+- [REQ-459A] When exporting Markdown to PDF, the FastMD Viewer SHALL use a base text size of 10pt, and heading sizes of 16pt (H1), 14pt (H2), and 12pt (H3)
 
 ### Background Process Log Tab
-- [REQ-460]: The FastMD Viewer SHALL provide a Background Processes tab in the center panel tab bar that displays real-time output from background processes.
-- [REQ-461A]: When the first background task starts, the FastMD Viewer SHALL open the Background Processes tab.
-- [REQ-461B]: The FastMD Viewer SHALL allow the user to close the Background Processes tab.
-- [REQ-461C]: When the user selects View → Background Processes, the FastMD Viewer SHALL open or focus the Background Processes tab.
-- [REQ-462]: The FastMD Viewer SHALL include in each Background Process Log entry a timestamp in HH:MM:SS.mmm format, the process category (Indexer, Watcher, PDF Converter, Image Vision, LLM Tools), and the message text.
-- [REQ-463]: The FastMD Viewer SHALL provide filter controls for process category and text search in the Background Processes tab.
-- [REQ-464A]: The FastMD Viewer SHALL retain the last 10,000 Background Process Log entries in memory.
-- [REQ-464B]: When the application exits, the FastMD Viewer SHALL write the in-memory Background Process Log to `logs/background-process.log` in the user config directory.
-- [REQ-465A]: While the user has not manually scrolled up in the Background Processes tab, the tab SHALL auto-scroll to the newest entry.
-- [REQ-465B]: If the user has manually scrolled up, then the Background Processes tab SHALL pause auto-scroll until the user scrolls to the bottom.
+- [REQ-460] The FastMD Viewer SHALL provide a Background Processes tab in the center panel tab bar that displays real-time output from background processes.
+- [REQ-461A] When the first background task starts, the FastMD Viewer SHALL open the Background Processes tab.
+- [REQ-461B] The FastMD Viewer SHALL allow the user to close the Background Processes tab.
+- [REQ-461C] When the user selects View → Background Processes, the FastMD Viewer SHALL open or focus the Background Processes tab.
+- [REQ-462] The FastMD Viewer SHALL include in each Background Process Log entry a timestamp in HH:MM:SS.mmm format, the process category (Indexer, Watcher, PDF Converter, Image Vision, LLM Tools), and the message text.
+- [REQ-463]  The FastMD Viewer SHALL provide filter controls for process category and text search in the Background Processes tab.
+- [REQ-464A] The FastMD Viewer SHALL retain the last 10,000 Background Process Log entries in memory.
+- [REQ-464B] When the application exits, the FastMD Viewer SHALL write the in-memory Background Process Log to `logs/background-process.log` in the user config directory.
+- [REQ-465A] While the user has not manually scrolled up in the Background Processes tab, the tab SHALL auto-scroll to the newest entry.
+- [REQ-465B] If the user has manually scrolled up, then the Background Processes tab SHALL pause auto-scroll until the user scrolls to the bottom.
 
 ### Image Support (Vision)
-- [REQ-470]: When initial indexing runs or when the file watcher receives a file system change notification, the FastMD Viewer SHALL scan all configured image libraries for files with extensions `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, and `.avif`.
-- [REQ-471]: The FastMD Viewer SHALL NOT display image files in the directory tree or tab bar.
-- [REQ-471A]: The FastMD Viewer SHALL NOT expose image files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
-- [REQ-472]: When the FastMD Viewer discovers an image file, the FastMD Viewer SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
-- [REQ-473]: If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the image's last-modified timestamp, then the FastMD Viewer SHALL queue the image for vision analysis.
-- [REQ-475]: When the FastMD Viewer queues an image for vision analysis, the FastMD Viewer SHALL invoke the model tagged with the `vision` use_case and SHALL send the image as a base64-encoded data URL in the message content.
-- [REQ-475A]: The FastMD Viewer SHALL request that the model return a detailed Markdown description of the image contents, including text, objects, scenes, charts, diagrams, and UI elements.
-- [REQ-476A]: If the vision model returns a successful analysis, then the FastMD Viewer SHALL write the generated Markdown description to the corresponding `.md` file, creating or overwriting as needed.
-- [REQ-476B]: If the vision model returns an error, then the FastMD Viewer SHALL log the error to the Background Process Log and SHALL NOT write the Markdown description.
-- [REQ-477]: While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files or every 5 seconds, reporting images found and analyses queued and completed.
-- [REQ-478]: When the file watcher receives a file system change notification related to images, the FastMD Viewer SHALL log the event type and virtual path to the Background Process Log.
+- [REQ-470] When initial indexing runs or when the file watcher receives a file system change notification, the FastMD Viewer SHALL scan all configured image libraries for files with extensions `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, and `.avif`.
+- [REQ-471] The FastMD Viewer SHALL NOT display image files in the directory tree or tab bar.
+- [REQ-471A] The FastMD Viewer SHALL NOT expose image files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
+- [REQ-472] When the FastMD Viewer discovers an image file, the FastMD Viewer SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
+- [REQ-473] If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the image's last-modified timestamp, then the FastMD Viewer SHALL queue the image for vision analysis.
+- [REQ-475] When the FastMD Viewer queues an image for vision analysis, the FastMD Viewer SHALL invoke the model tagged with the `vision` use_case and SHALL send the image as a base64-encoded data URL in the message content.
+- [REQ-475A] The FastMD Viewer SHALL request that the model return a detailed Markdown description of the image contents, including text, objects, scenes, charts, diagrams, and UI elements.
+- [REQ-476A] If the vision model returns a successful analysis, then the FastMD Viewer SHALL write the generated Markdown description to the corresponding `.md` file, creating or overwriting as needed.
+- [REQ-476B] If the vision model returns an error, then the FastMD Viewer SHALL log the error to the Background Process Log and SHALL NOT write the Markdown description.
+- [REQ-477] While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files or every 5 seconds, reporting images found and analyses queued and completed.
+- [REQ-478] When the file watcher receives a file system change notification related to images, the FastMD Viewer SHALL log the event type and virtual path to the Background Process Log.
 
 ### Semantic Vector Search & Indexing Pipeline
-- [REQ-480]: When the application starts with the `vector-search` feature enabled and an `embeddings` model configured, the FastMD Viewer SHALL initialize a background vector indexing worker on a dedicated thread.
-- [REQ-481]: The vector indexing worker SHALL connect to a persistent vector store using configured endpoint, collection name, and authentication credentials, falling back to corresponding environment variables.
-- [REQ-482]: If the target vector collection does not exist in the vector store, the system SHALL automatically initialize it configured with cosine distance and vector dimensions matching the configured embedding model, and SHALL create metadata indexes for document paths and chunk hashes.
-- [REQ-483]: On worker startup, the system SHALL synchronize an in-memory index of already indexed virtual paths and chunk hashes from the vector store to avoid redundant round-trips during indexing.
-- [REQ-484]: The worker SHALL crawl all configured text content libraries for Markdown files (`.md`, `.markdown`), strip YAML front-matter before chunking, and partition the body text into semantic chunks (~1,200 characters with 200-character overlap).
-- [REQ-485]: The worker SHALL compute a deterministic hash for each chunk and SHALL skip embedding generation for any document whose set of chunk hashes already matches the indexed state.
-- [REQ-486]: When a file is modified, the worker SHALL generate embeddings only for missing or updated chunks, store them in the vector store with deterministic identifiers derived from the virtual path and chunk hash, and delete obsolete chunks belonging to that file from the vector store.
-- [REQ-487]: When a Markdown file is deleted, the worker SHALL delete all vector records associated with that file's virtual path from the vector store and remove them from the in-memory index.
-- [REQ-488]: While initial vector indexing runs, the system SHALL emit progress entries to the Background Process Log (`Indexer` category) every 100 indexed documents.
-- [REQ-489]: If connection to the vector store or index initialization fails, the system SHALL log the error to the Background Process Log and disable vector search without interrupting other application functions.
-- [REQ-490]: The vector search service SHALL support cursor-based pagination to allow callers to retrieve subsequent pages of ranked search results.
+- [REQ-480] When the application starts with the `vector-search` feature enabled and an `embeddings` model configured, the FastMD Viewer SHALL initialize a background vector indexing worker on a dedicated thread.
+- [REQ-481] The vector indexing worker SHALL connect to a persistent vector store using configured endpoint, collection name, and authentication credentials, falling back to corresponding environment variables.
+- [REQ-482] If the target vector collection does not exist in the vector store, the system SHALL automatically initialize it configured with cosine distance and vector dimensions matching the configured embedding model, and SHALL create metadata indexes for document paths and chunk hashes.
+- [REQ-483] On worker startup, the system SHALL synchronize an in-memory index of already indexed virtual paths and chunk hashes from the vector store to avoid redundant round-trips during indexing.
+- [REQ-484] The worker SHALL crawl all configured text content libraries for Markdown files (`.md`, `.markdown`), strip YAML front-matter before chunking, and partition the body text into semantic chunks (~1,200 characters with 200-character overlap).
+- [REQ-485] The worker SHALL compute a deterministic hash for each chunk and SHALL skip embedding generation for any document whose set of chunk hashes already matches the indexed state.
+- [REQ-486] When a file is modified, the worker SHALL generate embeddings only for missing or updated chunks, store them in the vector store with deterministic identifiers derived from the virtual path and chunk hash, and delete obsolete chunks belonging to that file from the vector store.
+- [REQ-487] When a Markdown file is deleted, the worker SHALL delete all vector records associated with that file's virtual path from the vector store and remove them from the in-memory index.
+- [REQ-488] While initial vector indexing runs, the system SHALL emit progress entries to the Background Process Log (`Indexer` category) every 100 indexed documents.
+- [REQ-489] If connection to the vector store or index initialization fails, the system SHALL log the error to the Background Process Log and disable vector search without interrupting other application functions.
+- [REQ-490] The vector search service SHALL support cursor-based pagination to allow callers to retrieve subsequent pages of ranked search results.
 
 ### CLI & Deployment
-- [REQ-501]: The FastMD Viewer SHALL accept a workspace directory path as its first command-line argument.
-- [REQ-502]: If the provided workspace path does not exist, then the FastMD Viewer SHALL fall back to the current working directory.
-- [REQ-503]: The FastMD Viewer SHALL normalize Windows paths and SHALL strip UNC prefixes (`\\?\\`).
-- [REQ-504]: The build system SHALL include a release-deployment binary target named `deploy`.
+- [REQ-501] The FastMD Viewer SHALL accept a workspace directory path as its first command-line argument.
+- [REQ-502] If the provided workspace path does not exist, then the FastMD Viewer SHALL fall back to the current working directory.
+- [REQ-503] The FastMD Viewer SHALL normalize Windows paths and SHALL strip UNC prefixes (`\\?\\`).
+- [REQ-504] The build system SHALL include a release-deployment binary target named `deploy`.
 
 ## Non-Functional Requirements
 
-- **Performance**:
-    - [NFR-101]: The FastMD Viewer SHOULD start background indexing within 5 seconds of application start on a typical developer machine (optional, recommended metric).
-
-- **Security**:
-    - [NFR-201]: The FastMD Viewer SHALL restrict exposure of hidden file types (PDFs and images) to non-UI LLM tools unless explicitly enabled by configuration.
+- [NFR-101] The FastMD Viewer SHOULD start background indexing within 5 seconds of application start on a typical developer machine
+- [NFR-201] The FastMD Viewer SHALL restrict exposure of hidden file types (PDFs and images) to non-UI LLM tools unless explicitly enabled by configuration
 
 
 

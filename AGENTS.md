@@ -49,6 +49,7 @@
 
 ## Spec traceability
 - [RUST-040] Every user-facing behaviour maps to a requirement in `SPEC.md`. When adding or changing a feature, You SHOULD cite `REQ-xxx` in `//!`/`///` comments when making changes to the code.
+- The `UIF-*` ids cited throughout `src/app` (hundreds of citations across roughly fifty distinct ids) are specified **upstream**, not here: the authority is [`src/hoarfrost/spec.md`](https://github.com/MartinKuhne/hoarfrost/blob/main/src/hoarfrost/spec.md) in <https://github.com/MartinKuhne/hoarfrost>. `RUST-043` covers it too — you MUST NOT edit it from this repo.
 - [RUST-041] You MUST point out any drift between implemented behaviour and code.
 - [RUST-042] Requirements MUST be high level, goal oriented and user facing. Avoid leaking implementation specifics.
 - `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; You MUST update it when module boundaries or contracts change.
@@ -84,9 +85,50 @@ Before marking any task as complete, run the following from `/` and ensure they 
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
 | [`src/app`](src/app/AGENTS.md) | Main user facing application                |
+| [`src/agent`](src/agent/AGENTS.md) | Core agent engine, LLM client, tools & protocol clients |
+| [`src/agent/tools`](src/agent/tools/AGENTS.md) | Tool trait, registry and tool families |
+| [`src/app/integrations`](src/app/integrations/AGENTS.md) | Application external service integrations |
 | [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
 | [`test/wiki/AGENTS.md`](test/wiki/AGENTS.md)                   | Test wiki fixtures.                                                                   |
+
+### External framework: `hoarfrost`
+
+The UI widget library and design-token source (`hoarfrost`) is **not** in this repo. It is a
+crates.io dependency in the root `Cargo.toml`
+(`hoarfrost = { version = "0.14.0", features = [ "badge", "button", … ] }`), published from
+<https://github.com/MartinKuhne/hoarfrost>. Its versions track iced's, so `0.14.0` is the same
+framework the old in-tree crate called `0.2.0`.
+
+- You MUST name features explicitly: the crate declares `default = []`, so a bare version
+  requirement compiles **zero widgets**. This repo lists the widgets it actually imports rather
+  than `all`, so a widget the app starts using fails to compile until its feature is named, and
+  one it stops using leaves the build. The ungated modules (`token`, `token_lint`, `geometry`,
+  `focus`, `binding`, `bridge`, `state`, `validation`) need no feature.
+- The headless capture harness is `hoarfrost::test_helpers`, behind the `test-helpers` feature.
+  It is declared in `[dev-dependencies]`, NOT in the normal dependency, so it compiles for test
+  targets only and never reaches the shipped binary. Use its `screenshot` / `Capture` / `Frame`
+  instead of writing another headless-render harness.
+- You MUST treat its spec (the `UIF-*` requirement IDs in upstream `src/hoarfrost/spec.md`) and its
+  test suite as living upstream at <https://github.com/MartinKuhne/hoarfrost>. `cargo nextest run
+  --workspace` here does NOT run them, and `cargo clippy --workspace` does not lint them — the
+  framework's own CI is the only place its gates run.
+- You MUST bump the framework by editing the version requirement, and the bump commit message MUST
+  name what moved (old → new version, upstream PR/commit subject), because a version bump carries no
+  otherwise readable history here. `cargo update -p hoarfrost` moves within the declared requirement;
+  a new minor or major needs the requirement edited.
+- When you work on the framework itself you MUST use the two-repo loop: clone it alongside this repo
+  (`git clone https://github.com/MartinKuhne/hoarfrost ../hoarfrost`), then add a
+  `[patch.crates-io]` block with `hoarfrost = { path = "../hoarfrost/src/hoarfrost" }` to the root
+  `Cargo.toml` — **locally and uncommitted**, never committed. This is verified to work.
+- You MUST NOT use the `--config` command-line equivalent of that patch: under PowerShell the inner
+  quotes are stripped before cargo sees the argument. Use the manifest block above, or a user-level
+  `paths = [...]` override in `%USERPROFILE%\.cargo\config.toml`.
+- Without that patch block, `cargo nextest run --workspace` in this repo tests the *published*
+  crates.io crate, not your working clone. You MUST say so in the PR body of any cross-repo change.
+  A `[patch.crates-io]` override is only accepted when the local crate's `version` still satisfies
+  the requirement in `Cargo.toml`, so bump the clone's version to match before expecting the patch
+  to take effect.
 
 ### Observabsility
 

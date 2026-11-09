@@ -60,9 +60,22 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [[profile.ci.overrides]]
 filter = 'test(/all_commonmark/) | test(/slow_commonmark/)'
 slow-timeout = { period = "60s", terminate-after = 30 }
+# Tests carrying the `slow_` prefix are slow by design (property
+# sweeps over generated input, the table geometry viewport sweep)
+# and are excluded from the `fast` profile for that reason. On
+# their own they finish in ~30 s, but the default 60 s ceiling is
+# reached as soon as the suite runs them alongside every other
+# test on a fully loaded machine. The override keeps them running
+# under load without removing the bound entirely.
+[[profile.ci.overrides]]
+filter = 'test(/slow_/)'
+slow-timeout = { period = "60s", terminate-after = 5 }
 # Local CI profile mirrors the GH Actions profile so
 # `cargo nextest run --profile ci` on a developer machine
 # catches the same timeout the runner would.
 [[profile.default.overrides]]
 filter = 'test(/all_commonmark/) | test(/slow_commonmark/)'
 slow-timeout = { period = "60s", terminate-after = 30 }
+[[profile.default.overrides]]
+filter = 'test(/slow_/)'
+slow-timeout = { period = "60s", terminate-after = 5 }

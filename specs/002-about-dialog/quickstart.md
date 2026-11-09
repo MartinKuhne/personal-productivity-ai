@@ -19,6 +19,11 @@ cargo doc --no-deps --quiet
 
 ## Automated Validation (no display needed)
 
+> **Note (2026-10-31)**: the suite names listed below are the original egui-era
+> ones. The shipped implementation is the iced rebuild; its tests live in
+> `src/app/ui_iced/about_tests.rs` and `src/app/ui_iced/attributions_tests.rs`
+> (`cargo nextest run -p fastmd --lib about`, `--lib attributions`).
+
 ```powershell
 # Unit + attribution invariants
 cargo nextest run -p fastmd --status-level fail --show-progress none
@@ -32,7 +37,7 @@ Expected: all tests pass including new suites:
 - `dialogs::tests::test_new_dialogs_is_empty` (covers `about_dialog_open == false`)
 - `panels::top_tests::test_about_button_click_opens_dialog` (Tier-4 harness: hamburger → About → bus `OpenAboutDialog` + `ABOUT_EVENT`)
 - `attributions::tests::*`:
-  - `all_entries_have_valid_fields` — 58 entries non-empty https URLs
+  - `all_entries_have_valid_fields` — 61 entries non-empty https URLs
   - `slice_is_sorted_and_unique`
   - `completeness_against_cargo_manifests` — parses `Cargo.toml` workspace members
 - `about_dialog::tests::*`:
@@ -58,14 +63,14 @@ cargo run
 
 1. **Hamburger entry**: Click ☰ (top-right toolbar) → verify `About FastMD...` entry appears after a separator near bottom of menu.
 2. **Open dialog**: Click `About FastMD...` → About dialog appears titled `About FastMD`; hamburger menu closes.
-3. **Header**: Verify `FastMD Viewer` bold heading and `Copyright (c) 2026 Martin Kuhne`.
+3. **Header**: Verify `FastMD AI` bold heading and `Copyright (c) 2026 Martin Kuhne`.
 4. **Build metadata**: Row shows `Branch: <name>`, `Commit: <7-8 chars>`, `Built: YYYY-MM-DD`. On git-enabled build each field is not `unknown`.
-5. **Hover full hash**: Hover over commit short hash → tooltip shows `Full commit: <40 chars>\nClick to copy full commit hash`.
-6. **Click-to-copy**: Click short hash → full 40-char hash is on clipboard (paste into editor to confirm). A transient notification/badge may show `Commit hash copied to clipboard`.
-7. **License**: Scroll in `License` section (capped ~140px) → full MIT text visible, selectable, main window does not scroll.
-8. **Attributions**: Scroll in `Third-Party Attributions` section (capped ~240px) → 58 rows alphabetically sorted, each row has crate name (strong), authors, and `https://github.com/...` link.
+5. **Click-to-copy**: Click the commit cell → full 40-char hash is on clipboard (paste into editor to confirm). There is **no hover tooltip** on iced; the reveal-on-hover step of the original plan is not implemented.
+6. **Size**: The card fills 80 % of the window on both axes and stays centred; shrinking the window shrinks the card (a viewport gutter keeps it inside the screen).
+7. **License**: Scroll in `License` section → full MIT text visible, selectable, main window does not scroll.
+8. **Attributions (inline)**: Scroll in the `Third-Party Attributions` section **inside the same card** → 61 rows alphabetically sorted, each row has crate name, authors, and a `https://github.com/...` link. There is no "View third-party attributions…" button and no second window.
 9. **Link open**: Click any attribution GitHub link (e.g., `anyhow`) → external browser opens repository.
-10. **Close**: Click title-bar `X` → dialog closes; reopen via hamburger → works again. With window at minimum size, both scroll areas remain usable.
+10. **Close**: Click `Close` in the card footer, or press `Escape` → the card closes; reopen via hamburger → works again. With a small window, both scroll areas remain usable.
 11. **Offline fallback**: Build with `GIT_BRANCH=unknown GIT_COMMIT=unknown cargo build` → dialog shows `unknown` for branch/commit without panic.
 12. **First-run auto-show**: Launch with fresh UI state (clear the app's persisted state) → About dialog opens automatically on startup. Close it, restart → no auto-show. Simulate an upgrade (recorded version older than `CARGO_PKG_VERSION`) → auto-shows exactly once, then stays quiet on subsequent starts.
 

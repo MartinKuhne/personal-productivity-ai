@@ -23,6 +23,7 @@
 //! actually host a CIDM document yet), and 3. Strategy 2 is
 //! wired in as a stub that selects the URL as the client_id;
 //! full hosting of the document is a future round.
+//! Unit tests live in the sibling `client_tests.rs` sidecar.
 
 use std::collections::HashMap;
 
@@ -207,83 +208,5 @@ fn register_dynamic(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn as_metadata() -> AuthorizationServerMetadata {
-        AuthorizationServerMetadata {
-            issuer: "https://auth.example.com".to_owned(),
-            authorization_endpoint: "https://auth.example.com/authorize".to_owned(),
-            token_endpoint: "https://auth.example.com/token".to_owned(),
-            jwks_uri: None,
-            registration_endpoint: None,
-            scopes_supported: vec!["read".to_owned()],
-            response_types_supported: vec!["code".to_owned()],
-            code_challenge_methods_supported: vec!["S256".to_owned()],
-            grant_types_supported: vec!["authorization_code".to_owned()],
-            token_endpoint_auth_methods_supported: vec!["none".to_owned()],
-            client_id_metadata_document_supported: false,
-            service_documentation: None,
-            ui_locales_supported: vec![],
-        }
-    }
-
-    #[test]
-    fn pre_registered_takes_priority_over_dcr() {
-        let pre = PreRegisteredClient {
-            client_id: "preset".to_owned(),
-            client_secret: Some("topsecret".to_owned()),
-        };
-        let mut meta = as_metadata();
-        // Even with a registration endpoint, pre-registered wins.
-        meta.registration_endpoint = Some("https://auth.example.com/register".to_owned());
-        let client = OAuthClient::resolve(Some(&pre), &meta, "https://mcp.example.com")
-            .expect("must resolve");
-        assert_eq!(client.client_id, "preset");
-        assert_eq!(client.client_secret.as_deref(), Some("topsecret"));
-    }
-
-    #[test]
-    fn no_registration_and_no_pre_registered_returns_error() {
-        let meta = as_metadata();
-        let err = OAuthClient::resolve(None, &meta, "https://mcp.example.com")
-            .expect_err("must fail without any path");
-        match err {
-            OAuthError::ClientRegistration(msg) => {
-                assert!(msg.contains("no usable client registration strategy"));
-            }
-            other => panic!("expected ClientRegistration, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn from_stored_returns_supplied_client_id() {
-        let meta = as_metadata();
-        let client = OAuthClient::from_stored(
-            "abc".to_owned(),
-            "https://auth.example.com".to_owned(),
-            &meta,
-            None,
-        )
-        .expect("must succeed");
-        assert_eq!(client.client_id, "abc");
-        assert!(client.client_secret.is_none());
-    }
-
-    #[test]
-    fn from_stored_uses_pre_registered_when_ids_match() {
-        let meta = as_metadata();
-        let pre = PreRegisteredClient {
-            client_id: "abc".to_owned(),
-            client_secret: Some("xyz".to_owned()),
-        };
-        let client = OAuthClient::from_stored(
-            "abc".to_owned(),
-            "https://auth.example.com".to_owned(),
-            &meta,
-            Some(&pre),
-        )
-        .expect("must succeed");
-        assert_eq!(client.client_secret.as_deref(), Some("xyz"));
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;

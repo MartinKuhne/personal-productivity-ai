@@ -1,6 +1,6 @@
 [package]
 name = "fastmd"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Fast Markdown viewer with AI agent capabilities"
 license = "MIT"
@@ -48,8 +48,32 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-appender = "0.2"
 base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "persistence"] }
-egui_extras = { version = "0.36", default-features = false }
+# UI framework migration (TASK-003, `doc/planning/iced.md`): iced ships as a
+# REGULAR (non-optional) dependency per DEC-011 — no feature flag exists.
+# The `markdown` feature gates iced's built-in Markdown widget
+# (`iced-0.14.0/Cargo.toml:93` `markdown = ["iced_widget/markdown"]`,
+# `iced_widget-0.14.2/Cargo.toml:51` `markdown = ["dep:pulldown-cmark"]`).
+# The agent transcript renders assistant output through it ([TASK-018]).
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tiny-skia",
+    "fira-sans",
+    "advanced-shaping",
+    "markdown",
+] }
+# `cosmic-text` and `iced_graphics` are DIRECT dependencies so the text
+# measurer can shape strings with the same Fira Sans bytes iced paints with
+# (`iced_graphics::text::FIRA_SANS_REGULAR`) instead of the flat
+# character-count heuristic ([GAP-06], `src/app/ui_iced/table_width.rs`).
+# Both are ALREADY in the dependency graph through `iced`
+# (`iced` -> `iced_renderer` -> `iced_graphics` -> `cosmic-text` 0.15, and
+# `iced_graphics` requests `cosmic-text` with its default features), so
+# naming them here pulls in no additional compilation — it only makes the
+# two items reachable by path. `fira-sans` on `iced_graphics` is the
+# `cfg` gate for the `FIRA_SANS_REGULAR` const and mirrors the feature
+# already enabled on `iced` above.
+cosmic-text = "0.15.0"
+iced_graphics = { version = "0.14.0", features = ["fira-sans"] }
 notify = "8"
 playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -57,6 +81,7 @@ rustls = { version = "0.23", features = ["ring"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9"
+futures = "0.3"
 futures-util = { version = "0.3", optional = true }
 tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"], optional = true }
@@ -80,6 +105,49 @@ tempfile = "3.8"
 # `rfd` — Rusty File Dialogs. Used by "Save as PDF..."
 rfd = "0.17"
 fastmd-pdf = { path = "src/md2pdf" }
+# `hoarfrost` — the framework crate that owns the `UIF-TOK-005` design tokens.
+# It is an EXTERNAL crate now, not a workspace member: it is published to
+# crates.io from <https://github.com/MartinKuhne/hoarfrost>, so `--workspace`
+# here builds it as a dependency and neither lints nor compiles its tests.
+# It is still `fastmd`'s single source of design truth since increment INT-1:
+# `src/app/ui/theme.rs` derives every overlapping semantic palette token
+# from `hoarfrost::token::color::Palette::dark()` instead of a literal.
+# Versions track iced's, so `0.14.0` sits beside `iced = "0.14.0"` above; it is
+# NOT the old in-tree `0.2.0` — the framework was renumbered on publication.
+# The feature list below is REQUIRED, not an optimisation: the crate declares
+# `default = []`, so a bare `hoarfrost = "0.14.0"` compiles ZERO widgets.
+# It is the explicit set this app imports, not `all` — a widget the app stops
+# using drops out of the build, and one it starts using fails to compile until
+# the feature is named here. Derived from the `hoarfrost::` import sweep of
+# `src/app`; the modules the app leans on hardest (`token`, `token_lint`,
+# `geometry`, `focus`, `binding`, `bridge`, `state`, `validation`, `composite::
+# icon`) are ungated upstream and need no feature.
+# Bumping the framework means editing the version below (or `cargo update -p
+# hoarfrost` to move within the declared requirement); the commit message MUST
+# name the old and new versions, because a dependency bump carries no otherwise
+# readable history.
+# The crate's own spec (the `UIF-*` requirement IDs) and its test suite live
+# upstream, so `cargo nextest run --workspace` here no longer runs them.
+hoarfrost = { version = "0.14.0", features = [
+    "badge",
+    "button",
+    "combo-box",
+    "dialog",
+    "form-field",
+    "hyperlink",
+    "list-tile",
+    "menu",
+    "modal",
+    "movable",
+    "scroll-view",
+    "text-input",
+    "toggle",
+    "tooltip",
+    "tree-row",
+    "tree-view",
+    "virtual-list",
+    "zorder",
+] }
 arc-swap = "1.9.2"
 async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
 text-splitter = { version = "0.32", optional = true }
@@ -98,9 +166,6 @@ windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] 
 [target."cfg(not(windows))".dependencies]
 trash = "5.2.6"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-eframe = { version = "0.36", features = ["wayland", "x11"] }
-
 [dev-dependencies]
 tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
@@ -109,13 +174,23 @@ proptest = "1.4"
 rayon = "1.10"
 # `criterion` is the project-wide micro-benchmark harness.
 criterion = { version = "0.5", features = ["html_reports"] }
-egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
-accesskit = "0.24"
 log = "0.4"
-# `image` is used by `egui_kittest::snapshot`
 image = { version = "0.25", default-features = false, features = ["png"] }
 wiremock = "0.6"
 typst-syntax = "0.15"
+# `iced_test` — headless iced interface driver ([TASK-025], DEC-011).
+# Tests widgets and whole applications without opening a window
+# (`doc/iced.md` "iced_test"). Used by the tier-2 simulator tests in
+# `src/app/ui_iced/interaction_tests.rs`.
+iced_test = "0.14.0"
+# The framework's own headless capture harness (`screenshot`, `Capture`,
+# `Frame`, `headless_renderer`), published behind hoarfrost's `test-helpers`
+# feature. Declared here rather than on the normal dependency above so the
+# harness is compiled for test targets only and never reaches the shipped
+# binary; cargo unifies it with the feature list above when building tests.
+# The flag adds no crate: `iced_runtime`, `iced_renderer` and `iced_futures`
+# are already compiled as part of `iced`.
+hoarfrost = { version = "0.14.0", features = ["test-helpers"] }
 
 [[bin]]
 name = "fastmd"

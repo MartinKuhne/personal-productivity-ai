@@ -19,7 +19,9 @@ pub(crate) mod indexer;
 pub mod logs;
 pub(crate) mod models;
 pub(crate) mod pdf_converter;
+pub(crate) mod tag_manager;
 pub(crate) mod task;
+pub(crate) mod user_file_operation;
 #[cfg(feature = "vector-search")]
 pub(crate) mod vector_search;
 #[cfg(feature = "image-library")]
@@ -31,6 +33,9 @@ pub use models::ImageJob;
 pub(crate) use models::{BackgroundLogEntry, LogCategory};
 pub use pdf_converter::{PdfConversionJob, PdfConverterWorker};
 pub use task::Task;
+pub use user_file_operation::{
+    UserFileOperation, UserFileOperationResult, UserFileOperationWorker,
+};
 #[cfg(feature = "vector-search")]
 pub use vector_search::{
     VectorSearchService, is_markdown, markdown_chunks, start as start_vector_search,

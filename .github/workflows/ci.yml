@@ -60,6 +60,16 @@ jobs:
       - run: cargo install cargo-nextest --locked --version ^0.9
       - name: Install Vulkan software renderer (lavapipe)
         run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
+      # The suite measures real text layout through `iced_test`, so it needs the
+      # fonts the product expects on Linux. `ui::fonts::candidate_fallback_font_paths`
+      # looks for `NotoSansSymbols-Regular.ttf`, and widgets request families
+      # (`Fira Sans`) that only resolve through the host collection. The runner
+      # image ships only `fonts-noto-color-emoji`, which leaves symbol-only
+      # codepoints such as the ☰ hamburger glyph unresolved and three
+      # click-through tests miss the button. Installed explicitly so the run does
+      # not depend on whichever fonts the runner image happens to carry.
+      - name: Install the fonts the layout tests measure against
+        run: sudo apt-get install -y --no-install-recommends fonts-noto-core fonts-noto-color-emoji
       # Use the `ci` profile (no retries, fail-fast, JUnit output) defined
       # in `.config/nextest.toml`. Local devs use the default
       # profile (2 retries, top-failures summary).

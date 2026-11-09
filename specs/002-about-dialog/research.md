@@ -32,7 +32,7 @@ All Technical Context unknowns were known or resolved during spec drafting; no `
 
 ### 4. Attribution Catalog Scope and Shape
 
-**Decision**: `pub struct Attribution { name: &'static str, authors: &'static str, github_url: &'static str }` + `pub const DIRECT_DEPENDENCIES: &[Attribution]` with 58 curated entries sorted alphabetically, sourced from workspace `Cargo.toml` direct dependencies excluding workspace members (`fastmd`, `fastmd-agent`, `fastmd-pdf`, `fastmd-tool-macros`).
+**Decision**: `pub struct Attribution { name: &'static str, authors: &'static str, github_url: &'static str }` + `pub const DIRECT_DEPENDENCIES: &[Attribution]` with 61 curated entries sorted alphabetically, sourced from workspace `Cargo.toml` direct dependencies excluding workspace members (`fastmd`, `fastmd-agent`, `fastmd-pdf`, `fastmd-tool-macros`).
 
 **Rationale**: Curated static list avoids runtime network / crate-registry parsing, keeps binary self-contained, and satisfies license attribution. Sorted alphabetical order with duplicate detection gives deterministic diff review. Completeness verified by an automated test parsing `Cargo.toml` members.
 
@@ -81,7 +81,7 @@ None. All unknowns resolved; no `NEEDS CLARIFICATION` remains.
 - `src/app/command_executor.rs:72` — handler already present
 - `src/app/ui/panels/top.rs:apply_about_button_click` — helper already present
 - `LICENSE` at repo root (MIT)
-- `Cargo.toml` workspace members and direct dependencies enumeration (58 entries listed in spec FR-009)
+- `Cargo.toml` workspace members and direct dependencies enumeration (61 entries listed in spec FR-009)
 - `src/app/ui/persisted.rs` — `PersistedUiState` shape, `#[serde(default)]` fields, `CURRENT_SCHEMA_VERSION` migration precedent
 - `src/app/ui/app/init.rs:186-212` — `FastMdApp::new` restore + migration seam for the first-run check
 - `src/app/ui/app/mod.rs:256-273` — `save()` serializes `persisted_ui_state`; the recorded version rides along with no new logic

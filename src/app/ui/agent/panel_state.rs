@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 /// Pure UI view state for the agent panel, owned by `AppOrchestrator`.
 ///
-/// Fields previously lived on `AgentSession` / `AgentState` (the
-/// agent-domain structs). Moving them here enforces SC-007: the agent
-/// layer has no UI widget state (migration step 6, FR-013).
+/// Keeping these fields here — rather than on the agent-domain structs
+/// (`AgentSession` / `AgentState`) — keeps the agent layer free of UI
+/// widget state.
 pub struct AgentPanelState {
     /// Whether the agent results panel is visible.
     pub show_results: bool,
@@ -22,7 +22,7 @@ pub struct AgentPanelState {
     /// The user's command input text.
     pub command_input: String,
     /// Stable string id of the heading the agent-results panel should
-    /// scroll to. The UI layer maps it to an `egui::Id` at render time.
+    /// scroll to. The UI layer maps it to an `Id` at render time.
     pub scroll_to_id: Option<String>,
     /// Number of JSON rows to show in the debug window's expanded entry view.
     pub debug_json_rows: usize,

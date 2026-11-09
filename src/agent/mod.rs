@@ -14,6 +14,7 @@ pub mod events;
 pub mod lib;
 pub mod llm_client;
 pub(crate) mod session;
+pub mod strings;
 pub(crate) mod tool_context;
 pub(crate) mod tool_executor;
 pub mod tools;

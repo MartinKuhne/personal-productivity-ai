@@ -236,7 +236,7 @@ fn g3_sum_equals_available_with_drift() {
 fn nan_input_panics_instead_of_propagating() {
     // NaN is a programmer error. The function must panic with a
     // clear message, not silently return NaN-containing widths that
-    // would propagate into egui's layout (which then renders garbage
+    // would propagate into the rendered layout (which then draws garbage
     // or asserts deep inside).
     let max_nan = [f32::NAN, 1.0];
     let min = [0.0, 0.0];
@@ -279,9 +279,9 @@ fn max_geq_min_invariant_panics_on_violation() {
     );
 }
 
-/// Sub-pixel drift from egui's font shaping (kerning, sub-pixel
-/// rounding) can make `layout_no_wrap("A" + "B")` differ from
-/// `layout_no_wrap("A") + layout_no_wrap("B")` by a fraction of a
+/// Sub-pixel drift from font shaping (kerning, sub-pixel
+/// rounding) can make `measure("A" + "B")` differ from
+/// `measure("A") + measure("B")` by a fraction of a
 /// pixel even though the rendered cell *is* the sum of fragments.
 /// The upstream `measure_cell` accumulates a token across
 /// `InlineElem` boundaries when no whitespace separates them; the
@@ -315,7 +315,7 @@ fn infinity_available_panics() {
     // `f32::INFINITY` as `available` is a programmer error: it
     // would lead to `f32::INFINITY * (m / sum_max)` in the surplus
     // share, producing `ColumnWidths` with `f32::INFINITY` widths
-    // that egui's layout cannot use. Like NaN, must be caught at
+    // that no downstream layout can use. Like NaN, must be caught at
     // the boundary, not propagated.
     let max = [100.0, 100.0];
     let min = [50.0, 50.0];
@@ -611,26 +611,25 @@ fn permutation_dissimilar_columns_exceed_viewport() {
 
 // ===================================================================
 // ===================================================================
-//  REGRESSION TESTS for the FTWA audit (P2-1 hardening pass).
+//  REGRESSION TESTS for the FTWA hardening pass.
 //
 //  Each test pins one specific input permutation and asserts the
-//  post-fix contract. Names are kept in `audit_*` form so that the
-//  audit report and the regression suite reference the same items.
-//  Bugs 1â€"3 were the original findings; the `audit_bug_*` tests now
-//  assert the *fixed* behavior and act as guard rails against
-//  re-introducing the original defect.
+//  contract the solver must honour. Names are kept in `audit_*` form
+//  so that the audit findings and the regression suite reference the
+//  same items. The `audit_bug_*` tests assert the required behaviour
+//  and act as guard rails against re-introducing the defect each one
+//  was written for.
 // ===================================================================
 
-/// BUG-1 (FIXED, then revised): Surplus regime with `sum_max = 0`
-/// (every column empty) now pins every column at its `max_content`
-/// (which is 0). The original defect (all-zero columns collapsing)
-/// is still prevented by the `measure` function's 1px floor guard,
-/// not by the surplus branch distributing spare width. With the
-/// surplus regime no longer stretching columns, an all-zero table
-/// simply has zero-width columns at the FTWA layer; `measure`
-/// guarantees the inputs to FTWA are never literally zero, so this
-/// input is now a degenerate contract test rather than a
-/// distribution test.
+/// BUG-1: Surplus regime with `sum_max = 0` (every column empty)
+/// pins every column at its `max_content`, which is 0. All-zero
+/// columns are kept from collapsing by the `measure` function's 1px
+/// floor guard, not by the surplus branch distributing spare width.
+/// not by the surplus branch distributing spare width. Because the
+/// surplus regime never stretches columns, an all-zero table simply
+/// has zero-width columns at the FTWA layer; `measure` guarantees
+/// the inputs to FTWA are never literally zero, so this input is a
+/// degenerate contract test rather than a distribution test.
 #[test]
 fn audit_bug_surplus_all_zero_max_returns_zero_widths() {
     let d = ftwa_v1(&[0.0, 0.0, 0.0], &[0.0, 0.0, 0.0], 100.0);
@@ -640,12 +639,11 @@ fn audit_bug_surplus_all_zero_max_returns_zero_widths() {
     assert_eq!(d.widths, vec![0.0, 0.0, 0.0]);
 }
 
-/// BUG-2 (FIXED, then revised): With the surplus regime pinning
-/// columns at `max_content` (no spare distribution), there is no
-/// float drift to fix in the surplus branch. The test now verifies
-/// the surplus branch returns `max_content` exactly for a
-/// non-trivial input that previously accumulated drift under the
-/// old proportional-distribution rule.
+/// BUG-2: With the surplus regime pinning columns at `max_content`
+/// (no spare distribution) there is no float drift to fix in the
+/// surplus branch. This test verifies the surplus branch returns
+/// `max_content` exactly for a non-trivial input large enough to
+/// accumulate drift under proportional distribution.
 #[test]
 fn audit_bug_surplus_pins_max_content_exactly() {
     let n = 1000;
@@ -656,7 +654,7 @@ fn audit_bug_surplus_pins_max_content_exactly() {
     let d = ftwa_v1(&max, &min, available);
     assert!(!d.needs_horizontal_scroll);
     assert_eq!(d.widths.len(), n);
-    // Surplus pins at max_content exactly â€" no drift, no stretching.
+    // Surplus pins at max_content exactly — no drift, no stretching.
     assert_eq!(d.widths, max);
 }
 
@@ -673,14 +671,14 @@ fn audit_bug_empty_max_with_nonempty_min_panics() {
     );
 }
 
-/// OBS-1: Tie-break is now consistent across B1 (wrap-set selection)
+/// OBS-1: Tie-break is consistent across B1 (wrap-set selection)
 /// and B2 (drift target). On slack tie, the lower column index wins
 /// in both branches.
 #[test]
 fn audit_observation_tiebreak_lower_index_wins() {
     // Two columns, identical slack. deficit=15 forces both into the
     // wrap set; the B2 drift target must pick the *lower* index on
-    // tie (was previously picking the higher one).
+    // a tie.
     let max = [20.0, 20.0];
     let min = [10.0, 10.0];
     let avail = 25.0;

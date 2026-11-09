@@ -6,24 +6,40 @@ use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use fastmd_agent::AgentToolContext;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Spawns a background thread that listens for [`ConfigArrived`] events on `config_bus`,
 /// performs one-time MCP initialization on startup, and refreshes MCP tools on subsequent
 /// configuration updates.
+///
+/// The initial wait uses the shared [`CONFIG_ARRIVAL_TIMEOUT`] window; use
+/// `spawn_config_subscription_with_timeout` to inject an explicit one
+/// (tests exercise the timeout fallback without a 10 s wait).
 pub fn spawn_config_subscription(
     tool_context: Arc<arc_swap::ArcSwap<AgentToolContext>>,
     config_bus: Bus<ConfigArrived>,
     tx: crate::bus::events::typed::BackgroundEventSender,
 ) {
+    spawn_config_subscription_with_timeout(tool_context, config_bus, tx, CONFIG_ARRIVAL_TIMEOUT);
+}
+
+/// [`spawn_config_subscription`] with an explicit initial-arrival window,
+/// replacing [`CONFIG_ARRIVAL_TIMEOUT`]. Production callers should not use
+/// this variant.
+pub fn spawn_config_subscription_with_timeout(
+    tool_context: Arc<arc_swap::ArcSwap<AgentToolContext>>,
+    config_bus: Bus<ConfigArrived>,
+    tx: crate::bus::events::typed::BackgroundEventSender,
+    arrival_timeout: Duration,
+) {
     let mut config_reader = config_bus.subscribe_async();
     let task = async move {
-        let config = match tokio::time::timeout(CONFIG_ARRIVAL_TIMEOUT, config_reader.recv()).await
-        {
+        let config = match tokio::time::timeout(arrival_timeout, config_reader.recv()).await {
             Ok(Ok(event)) => event.config,
             _ => {
                 tracing::error!(
                     name = "config.arrived.timeout",
-                    timeout_ms = CONFIG_ARRIVAL_TIMEOUT.as_millis() as u64,
+                    timeout_ms = arrival_timeout.as_millis() as u64,
                     "No ConfigArrived event observed within timeout; using default configuration"
                 );
                 crate::config::AppConfig::default()

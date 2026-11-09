@@ -2,17 +2,14 @@
 //!
 //! [`Document`] is the parsed-document newtype: one value that carries
 //! the raw source, the parsed AST events, the parsed front-matter (if
-//! any), and a revision counter. Callers that previously called
+//! any), and a revision counter. Callers hold one `Document` and reach
+//! both derived views through it instead of calling
 //! [`parse_front_matter`] and [`parse_markdown_to_events`] separately
-//! on the same content now hold one `Document` and reach both
-//! derived views through it.
+//! on the same content.
 //!
 //! Conventions:
 //! - `events()` returns the events parsed from the *body* (source with
-//!   the front-matter block stripped), not the full source. This
-//!   matches the previous behaviour of every call site that did
-//!   `parse_markdown_to_events(&tabs.current_markdown)` after
-//!   `tabs.current_markdown` was set to the body.
+//!   the front-matter block stripped), not the full source.
 //! - `body()` returns the full source when there is no front matter
 //!   and the post-`---` body when there is. This is what tools and
 //!   renderers should pass to a pure markdown parser.
@@ -149,8 +146,7 @@ pub fn apply_task_toggle(markdown: &mut String, task_index: usize, checked: bool
 ///
 /// Conventions (see the module docs for the full list):
 /// - `events()` returns events parsed from the *body*, not the
-///   full source. This matches the pre-refactor behaviour of every
-///   renderer call site that parsed `&tabs.current_markdown`.
+///   full source.
 /// - `body()` returns the full source when there is no front matter
 ///   and the post-`---` body when there is.
 #[derive(Clone, Debug)]
@@ -167,8 +163,8 @@ pub struct Document {
     /// every [`Document::update_source`] call.
     events: Vec<RenderEvent>,
     /// Monotonically increasing counter, bumped on every
-    /// [`Document::update_source`] call. Callers that previously
-    /// hashed the source themselves can use this instead.
+    /// [`Document::update_source`] call. Callers can use it in place
+    /// of hashing the source themselves to detect a change.
     revision: u64,
 }
 

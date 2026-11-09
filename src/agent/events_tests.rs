@@ -1,6 +1,6 @@
 //! Agent isolation test — verifies the agent loop runs and emits the
 //! contract-correct event sequence on `AgentEventObserver` with **no** UI
-//! crate, no `AppOrchestrator`, no `egui` import (quickstart scenario 2,
+//! crate, no `AppOrchestrator`, no UI-framework import (quickstart scenario 2,
 //! SC-001/SC-004).
 
 use crate::agent_impl::run_agent;

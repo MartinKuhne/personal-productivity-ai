@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::strings::{ERR_API_KEY_INVALID, ERR_NO_MODELS_CONFIGURED};
+
 // ---------------------------------------------------------------------------
 // Integration Clients
 // ---------------------------------------------------------------------------
@@ -73,7 +75,13 @@ pub struct LlmConfig {
     /// API endpoint URL.
     pub api_url: String,
     pub api_key: String,
-    /// Cost for auto-model selection (lower = preferred). Default 0.
+    /// Declared price for auto-model selection (lower = preferred).
+    ///
+    /// An absent price means **free**: `cost` is an optional integer whose
+    /// documented default is `0` ([AGENT-005], [CONFIG-006], [CONFIG-008]), so
+    /// a model nobody priced ties with a declared `cost: 0` and wins
+    /// cheapest-first selection ([AGENT-030], [AGENT-019]).
+    /// [`LlmConfig::get_cost`] reports that default.
     #[serde(default)]
     pub cost: Option<i32>,
     /// Use cases for this model (e.g. "chat", "vision", "embeddings").
@@ -120,9 +128,17 @@ pub fn default_use_case() -> Vec<String> {
 }
 
 impl LlmConfig {
+    /// Price used for auto-model selection: the declared `cost`, or `0` when
+    /// no price was set.
+    ///
+    /// The `0` is the documented default for an absent `cost` ([AGENT-005],
+    /// [CONFIG-006], [CONFIG-008]) and is the value selection actually ranks
+    /// on: an unpriced model is treated as free, so it ties with a declared
+    /// `cost: 0` and beats every priced model ([AGENT-030], [AGENT-019]).
     pub fn get_cost(&self) -> i32 {
         self.cost.unwrap_or(0)
     }
+
     pub fn has_use_case(&self, use_case: impl AsRef<str>) -> bool {
         let uc_ref = use_case.as_ref();
         self.use_case.iter().any(|u| u == uc_ref)
@@ -554,6 +570,13 @@ impl AgentConfig {
         self.system_library_name.as_deref().unwrap_or("System")
     }
 
+    /// Cheapest configured model that declares `use_case`, if any.
+    ///
+    /// Ranking uses [`LlmConfig::get_cost`], so a model with no declared price
+    /// counts as free ([AGENT-005]) and wins against a priced one. Among
+    /// candidates that rank equally, `HashMap` iteration order decides — the
+    /// map has no defined order, so callers must not depend on which tied
+    /// model is returned.
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
@@ -571,18 +594,18 @@ impl AgentConfig {
             } else if let Some(model_cfg) = self.models.values().next() {
                 model_cfg
             } else {
-                return Err("No LLM models are configured.".to_string());
+                return Err(ERR_NO_MODELS_CONFIGURED.to_string());
             }
         } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
             model_cfg
         } else if let Some(model_cfg) = self.models.values().next() {
             model_cfg
         } else {
-            return Err("No LLM models are configured.".to_string());
+            return Err(ERR_NO_MODELS_CONFIGURED.to_string());
         };
 
         if model_cfg.api_key == "your-api-key-here" || model_cfg.api_key.is_empty() {
-            return Err("API key not set or invalid.".to_string());
+            return Err(ERR_API_KEY_INVALID.to_string());
         }
 
         Ok(model_cfg)
