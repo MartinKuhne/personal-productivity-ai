@@ -1,12 +1,11 @@
 //! Tests for `background/vision_processor.rs`.
 
 use super::*;
-use crate::bus::events::file::{FileEvent, FileEventKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::config::{AppConfig, LlmConfig};
 use std::path::PathBuf;
-use std::sync::mpsc;
 
-use crate::ui::test_helpers::app::noop_producer;
+use crate::ui_iced::test_helpers::noop_producer;
 
 #[tokio::test]
 async fn test_process_image_no_model() {
@@ -15,7 +14,7 @@ async fn test_process_image_no_model() {
         md_path: PathBuf::from("test.md"),
     };
     let config = AppConfig::default();
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let result = process_image(
         job,
         config,
@@ -44,7 +43,7 @@ async fn test_process_image_missing_file() {
             use_case: vec!["vision".to_string()],
         },
     );
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let result = process_image(
         job,
         config,
@@ -107,25 +106,31 @@ async fn test_process_image_success() {
     // produced `.md` once the file is on disk. The bus is
     // owned (no leak needed since `FileEventProducer` is now
     // lifetime-free).
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let reader = bus.subscribe();
     let producer = FileEventProducer::new(bus);
 
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let result = process_image(job, config, BackgroundEventSender::new(tx), &producer).await;
 
     assert!(result.is_ok());
     let md_content = std::fs::read_to_string(&md_path).unwrap();
     assert_eq!(md_content, "Mock description");
 
-    // The bus must have received a Discovered event for the
-    // output `.md`. This is what the directory tree and
-    // render tab rely on to pick up the new file.
+    // The bus must have received a `[FileChanged][Added]` event for the
+    // output `.md` ([REQ-332]: a not-previously-seen file is an addition).
+    // This is what the directory tree and render tab rely on to pick up
+    // the new file.
     let event = reader
         .recv_timeout(std::time::Duration::from_millis(200))
-        .expect("process_image should publish a Discovered event for the output .md");
-    assert_eq!(event.kind, FileEventKind::Discovered);
-    assert_eq!(event.paths[0], md_path);
+        .expect("process_image should publish an Added file event for the output .md");
+    assert!(matches!(
+        &event,
+        changed
+            if changed.kind == FileChangedKind::Added
+                && changed.files.len() == 1
+                && changed.files[0].path == md_path
+    ));
 }
 
 #[tokio::test]
@@ -174,7 +179,7 @@ async fn test_process_image_api_error() {
         },
     );
 
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let result = process_image(
         job,
         config,
@@ -233,7 +238,7 @@ async fn test_process_image_no_content() {
         },
     );
 
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let result = process_image(
         job,
         config,

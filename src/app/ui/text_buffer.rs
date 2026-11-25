@@ -1,11 +1,11 @@
-//! Egui-free text editing model — `TextBuffer`, `Cursor`, `Selection`, and `UndoStack`.
+//! Framework-free text editing model — `TextBuffer`, `Cursor`, `Selection`, and `UndoStack`.
 //!
 //! This module is the data layer for the inline markdown editor. It owns the
 //! file content, the front matter (preserved verbatim across saves), the
 //! cursor / selection state, and the undo history. Nothing in this module
-//! imports `eframe::egui`; the rendering layer in
-//! [`crate::ui::editor_egui`] adapts the buffer to egui's immediate-mode
-//! widgets and writes the resulting cursor position back here.
+//! imports a UI framework; the rendering layer in [`crate::ui_iced::editor`]
+//! adapts the buffer to the widget it renders and writes the resulting cursor
+//! position back here.
 //!
 //! ## Why a dedicated `TextBuffer`?
 //!
@@ -19,15 +19,15 @@
 //! - the rendering code is a thin adapter and doesn't need to know how
 //!   the buffer is saved or how undo history is stored, and
 //! - future consumers (e.g. a search-and-replace tool, an external
-//!   diff view) can read and mutate the buffer without going through
-//!   egui's text widget.
+//!   diff view) can read and mutate the buffer directly, without going
+//!   through a text widget.
 //!
 //! ## Save path
 //!
 //! [`TextBuffer::save`] writes the buffer to disk, publishes an
-//! `Updated` [`crate::bus::events::file::FileEvent`] so the rest of
+//! `[FileChanged][Changed]` ([`crate::bus::events::file::FileChanged`]) so the rest of
 //! the app refreshes immediately, and closes the editor. The publish
-//! needs a [`FileEventProducer`], which is itself egui-free; the
+//! needs a [`FileEventProducer`], which is itself framework-free; the
 //! producer reference is passed in rather than held on the buffer so
 //! the type stays plain Rust data with no framework-specific slots.
 //!
@@ -50,7 +50,7 @@ pub const DEFAULT_UNDO_CAPACITY: usize = 64;
 ///
 /// - `line` is 0-indexed
 /// - `column` is 0-indexed and measured in *characters* (not bytes), to
-///   match what users see on screen and what `egui::TextEdit` reports
+///   match what users see on screen and what the editor widget reports
 /// - `char_index` is the char offset into [`TextBuffer::content`], which
 ///   the renderer uses to look up the byte offset for slicing
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -148,12 +148,12 @@ impl UndoStack {
     /// Push a new entry onto the stack. Any redo branch is discarded.
     ///
     /// Consecutive pushes of identical content are coalesced into a
-    /// single entry (so a stream of `TextChanged` events from
-    /// `egui::TextEdit` does not flood the history).
+    /// single entry, so a stream of per-keystroke change notifications
+    /// from the editor widget does not flood the history.
     pub fn push(&mut self, content: String, cursor: Cursor, selection: Selection) {
         // Coalesce with the current position if the content is unchanged
-        // (egui emits a TextChanged per keystroke, most of which are
-        // no-ops in terms of the buffer's byte stream).
+        // (the editor emits a change notification per keystroke, most of
+        // which are no-ops in terms of the buffer's byte stream).
         if let Some(pos) = self.position
             && let Some(current) = self.entries.get(pos)
             && current.content == content
@@ -235,8 +235,8 @@ impl UndoStack {
 
 /// The text buffer that backs the inline markdown editor.
 ///
-/// `TextBuffer` is plain Rust data: it does not know about egui. The
-/// rendering layer in [`crate::ui::editor_egui`] reads the buffer's
+/// `TextBuffer` is plain Rust data: it does not know about any UI framework.
+/// The rendering layer in [`crate::ui_iced::editor`] reads the buffer's
 /// content, displays it, and writes the resulting cursor position back
 /// via [`set_cursor`](Self::set_cursor) before returning.
 #[derive(Debug, Default)]
@@ -322,7 +322,7 @@ impl TextBuffer {
     /// Persist the buffer to disk and notify the rest of the app.
     ///
     /// On success: writes the file (re-attaching the preserved front
-    /// matter), publishes a `FileEvent::Updated` via `producer`, and
+    /// matter), publishes a `[FileChanged][Changed]` via `producer`, and
     /// closes the editor. On failure: sets `error_message` and returns
     /// the error to the caller; the editor stays open so the user can
     /// retry.

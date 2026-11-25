@@ -1,0 +1,186 @@
+//! Tests for [`PersistedUiState`] (`ui::persisted`).
+
+use super::*;
+
+#[test]
+fn test_default_is_empty() {
+    let s = PersistedUiState::default();
+    assert_eq!(s.schema_version, 0);
+    assert!(s.left_panel_width.is_none());
+    assert!(s.right_panel_width.is_none());
+    assert!(s.window_width.is_none());
+    assert!(s.window_height.is_none());
+    assert!(s.window_x.is_none());
+    assert!(s.window_y.is_none());
+    assert!(s.font_size_scale.is_none());
+    assert!(s.expanded_dirs.is_empty());
+}
+
+#[test]
+fn test_round_trip_serialization_preserves_state() {
+    let mut s = PersistedUiState {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        left_panel_width: Some(250.0),
+        right_panel_width: Some(300.0),
+        window_width: Some(1200.0),
+        window_height: Some(800.0),
+        window_x: Some(100.0),
+        window_y: Some(50.0),
+        font_size_scale: Some(1.2),
+        ..Default::default()
+    };
+    s.expanded_dirs.insert(PathBuf::from("/notes/work"));
+    s.expanded_dirs.insert(PathBuf::from("/notes/personal"));
+
+    let json = serde_json::to_string(&s).unwrap();
+    let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(restored.left_panel_width, Some(250.0));
+    assert_eq!(restored.right_panel_width, Some(300.0));
+    assert_eq!(restored.window_width, Some(1200.0));
+    assert_eq!(restored.window_height, Some(800.0));
+    assert_eq!(restored.window_x, Some(100.0));
+    assert_eq!(restored.window_y, Some(50.0));
+    assert_eq!(restored.font_size_scale, Some(1.2));
+    assert_eq!(restored.expanded_dirs.len(), 2);
+    assert!(
+        restored
+            .expanded_dirs
+            .contains(&PathBuf::from("/notes/work"))
+    );
+}
+
+#[test]
+fn test_empty_json_object_deserialises_to_default() {
+    // Older builds may have written an empty `{}`; make sure the
+    // current struct (with `#[serde(default)]`) still parses it.
+    let restored: PersistedUiState = serde_json::from_str("{}").unwrap();
+    let default = PersistedUiState::default();
+    assert_eq!(restored.schema_version, default.schema_version);
+    assert_eq!(restored.left_panel_width, default.left_panel_width);
+    assert_eq!(restored.right_panel_width, default.right_panel_width);
+    assert_eq!(restored.window_width, default.window_width);
+    assert_eq!(restored.window_height, default.window_height);
+    assert_eq!(restored.window_x, default.window_x);
+    assert_eq!(restored.window_y, default.window_y);
+    assert_eq!(restored.font_size_scale, default.font_size_scale);
+    assert_eq!(restored.expanded_dirs.len(), default.expanded_dirs.len());
+}
+
+/// State written by the pre-fix build has no `schema_version`
+/// field; it deserialises to `0`. The migration in
+/// [`crate::ui_iced::persisted::migrate_legacy_state`] must clear
+/// `font_size_scale` for any version below
+/// `CURRENT_SCHEMA_VERSION` so the user is
+/// not silently carrying forward the absolute-ppp value that
+/// the old bug used to compound.
+#[test]
+fn test_pre_fix_state_round_trips_as_v0() {
+    // Hand-written JSON mimicking the pre-fix on-disk shape
+    // (no `schema_version` field, `font_size_scale` holds the
+    // absolute ppp from a 150% DPI display).
+    let legacy_json = r#"{
+            "left_panel_width": null,
+            "right_panel_width": null,
+            "window_width": null,
+            "window_height": null,
+            "window_x": null,
+            "window_y": null,
+            "font_size_scale": 1.5,
+            "expanded_dirs": []
+        }"#;
+    let restored: PersistedUiState = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(restored.schema_version, 0);
+    assert_eq!(restored.font_size_scale, Some(1.5));
+    // The schema migration is responsible for clearing
+    // font_size_scale when schema_version < CURRENT_SCHEMA_VERSION.
+    assert!(restored.schema_version < CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_corrupted_non_json_input_fails_to_deserialize() {
+    // Garbage that is not valid JSON must fail loudly rather than
+    // silently yielding a default, so a corrupt state file is
+    // surfaced instead of being masked.
+    let result: Result<PersistedUiState, _> = serde_json::from_str("this is not json{{{{");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_future_schema_version_round_trips_unchanged() {
+    // State written by a newer build carries a higher schema
+    // version; loading it must preserve the version verbatim so the
+    // caller can decide how to handle it (rather than clobbering it).
+    let s = PersistedUiState {
+        schema_version: CURRENT_SCHEMA_VERSION + 5,
+        left_panel_width: Some(100.0),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.schema_version, CURRENT_SCHEMA_VERSION + 5);
+    assert_eq!(restored.left_panel_width, Some(100.0));
+}
+
+#[test]
+fn test_nan_and_infinite_widths_round_trip_as_null() {
+    // serde_json serialises non-finite floats as JSON `null`, so a
+    // NaN/Inf width round-trips to `None` rather than corrupting
+    // the state file or panicking.
+    let nan_state = PersistedUiState {
+        left_panel_width: Some(f32::NAN),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&nan_state).unwrap();
+    let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.left_panel_width, None);
+
+    let inf_state = PersistedUiState {
+        window_width: Some(f32::INFINITY),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&inf_state).unwrap();
+    let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.window_width, None);
+}
+
+#[test]
+fn test_non_finite_json_width_is_rejected() {
+    // A JSON payload containing an explicitly non-finite float must
+    // also fail to deserialize.
+    let json = r#"{"left_panel_width": NaN}"#;
+    let result: Result<PersistedUiState, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_about_shown_for_version_round_trips() {
+    // Spec FR-016: the first-run version stamp defaults to unseen,
+    // survives a serde round-trip, and is absent (not an error) in
+    // state written before the field existed.
+    let default = PersistedUiState::default();
+    assert_eq!(default.about_shown_for_version, None);
+
+    let mut s = PersistedUiState {
+        about_shown_for_version: Some("0.2.0".to_owned()),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&s).unwrap();
+    let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.about_shown_for_version, Some("0.2.0".to_owned()));
+
+    s.about_shown_for_version = None;
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        !json.contains("about_shown_for_version"),
+        "unseen state should omit the field (skip_serializing_if); got {json}"
+    );
+
+    let legacy_json = r#"{"left_panel_width": null, "expanded_dirs": []}"#;
+    let legacy: PersistedUiState = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(
+        legacy.about_shown_for_version, None,
+        "pre-field state must deserialize to unseen, triggering one post-upgrade auto-show"
+    );
+}

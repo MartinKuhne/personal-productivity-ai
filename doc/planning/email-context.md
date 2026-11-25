@@ -31,7 +31,7 @@ occupancy — and we send no explicit cache directives
 (`src/agent/llm_client.rs`). The only lever that shrinks the window is
 payload discipline: this plan.
 
-Relevant requirements: `TOOL-033` (cursor pagination incl. `search_email`),
+Relevant requirements: `TOOL-049` (cursor pagination incl. `search_email`),
 `TOOL-026a` (32-item email pages), `TOOL-036` (`window_note`
 offset/limit convention to mirror), `TOOL-007` (cross-page `total`).
 All in `src/agent/tools/SPEC.md`.

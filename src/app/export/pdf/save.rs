@@ -25,7 +25,7 @@
 //! PDF export uses the official `typst` CLI binary found dynamically in
 //! the system `PATH`. The UI wires the "Save as PDF..." menu entry only
 //! when `fastmd_pdf::is_typst_available()` returns true — see
-//! `src/ui/tree/render.rs`.
+//! [`crate::ui_iced::panels::left`].
 //!
 //! Unit tests live in the sibling `save_tests.rs` sidecar.
 
@@ -253,10 +253,10 @@ fn write_pdf(path: &Path, bytes: &[u8]) -> Result<(), String> {
 // Unit tests live in the sibling `save_tests.rs` sidecar
 // (AGENTS.md RUST-056 / RUST-057).
 //
-// see: `src/export/pdf/save_tests.rs`
+// see: `src/app/export/pdf/save_tests.rs`
 //
 // Proptest-based property tests live in
-// `src/export/pdf/save_proptests.rs`. They run the same compile
+// `src/app/export/pdf/save_proptests.rs`. They run the same compile
 // pipeline against random printable-ASCII inputs as the strongest
 // possible "Typst syntax reference compliance" check: any escape
 // the translator is missing will surface as a compile failure

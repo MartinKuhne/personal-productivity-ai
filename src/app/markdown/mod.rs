@@ -2,7 +2,7 @@
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (MD-001..MD-018) for the full specification.
 //!
-//! Per `src/desktop/AGENTS.md`, this subsystem is the single import point for `pulldown-cmark`,
+//! Per `src/app/AGENTS.md`, this subsystem is the single import point for `pulldown-cmark`,
 //! `serde_norway` front-matter/table parsing, and Markdown AST types. `ui/`, `tools/`, `print.rs`,
 //! and `editor.rs` call into `markdown::` rather than handling Markdown directly.
 //!
@@ -11,7 +11,9 @@
 //!   entry, ToC builder).
 //! - `document` — `Document` parsed-document newtype, front-matter read/write, task-toggle.
 //! - `parser` — `pulldown-cmark`-backed parsing and HTML rendering.
-//! - `table_width` — pure Fair Table Width Algorithm (no egui, no Markdown types).
+//! - `table_width` — pure Fair Table Width Algorithm (no UI framework, no Markdown types).
+//! - `validation` — pre-save Markdown validation for the inline editor
+//!   (UI-043).
 
 pub(crate) mod document;
 pub(crate) mod link_scanner;
@@ -19,6 +21,7 @@ pub(crate) mod model;
 pub(crate) mod parser;
 pub(crate) mod table_layout;
 pub(crate) mod table_width;
+pub(crate) mod validation;
 
 pub use document::{Document, DocumentContent, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use link_scanner::scan_text_for_links;
@@ -26,8 +29,11 @@ pub use model::{
     IMAGE_PLACEHOLDER_PREFIX, InlineElem, RenderEvent, TextStyle, ToCEntry, WIKILINK_SCHEME,
     build_toc, heading_plain_text, image_placeholder,
 };
-pub use parser::{parse_markdown_to_events, parse_yaml_to_pairs, render_markdown_to_html};
+pub use parser::{
+    gfm_options, parse_markdown_to_events, parse_yaml_to_pairs, render_markdown_to_html,
+};
 pub use table_layout::{LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer};
 pub use table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
 };
+pub use validation::{MarkdownErrorKind, MarkdownParseError, validate_markdown};

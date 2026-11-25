@@ -34,6 +34,8 @@
 //! (`crate::app::browser`) or the file-watcher plumbing
 //! (`crate::app::watcher`) directly. The old paths still
 //! re-export this module for backwards compatibility.
+//!
+//! Unit tests live in the sibling `browser_session_tests.rs` sidecar.
 
 use crate::config::{AppConfig, ResolvedBrowserConfig};
 use std::path::PathBuf;
@@ -485,105 +487,8 @@ async fn launch_firefox(cfg: ResolvedLaunch) -> Result<LiveSession, String> {
 }
 
 #[cfg(all(test, feature = "browser"))]
-mod tests {
-    use super::*;
-    use crate::config::{BrowserConfig, ContentLibrary};
-    use std::path::PathBuf;
-
-    fn empty_resolved(dir: PathBuf) -> ResolvedBrowserConfig {
-        let storage_path = dir.join("storage.json");
-        ResolvedBrowserConfig {
-            screenshot_dir: dir,
-            headless: true,
-            browser_type: "firefox".to_string(),
-            idle_timeout_seconds: 60,
-            page_load_timeout_ms: 30_000,
-            storage_state_path: storage_path,
-        }
-    }
-
-    #[test]
-    fn test_resolve_screenshot_path_accepts_simple_name() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        let path = session.resolve_screenshot_path("page.png").unwrap();
-        assert_eq!(path, tmp.path().join("page.png"));
-    }
-
-    #[test]
-    fn test_resolve_screenshot_path_rejects_traversal() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        assert!(session.resolve_screenshot_path("..").is_err());
-        assert!(session.resolve_screenshot_path("../etc/passwd").is_err());
-        assert!(session.resolve_screenshot_path("a/b.png").is_err());
-        assert!(session.resolve_screenshot_path("a\\b.png").is_err());
-    }
-
-    #[test]
-    fn test_resolve_screenshot_path_rejects_dotfile() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        assert!(session.resolve_screenshot_path(".hidden").is_err());
-    }
-
-    #[test]
-    fn test_resolve_screenshot_path_rejects_too_long() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        let long = "a".repeat(129) + ".png";
-        assert!(session.resolve_screenshot_path(&long).is_err());
-    }
-
-    #[test]
-    fn test_resolve_screenshot_path_rejects_forbidden_chars() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        for bad in ["foo bar.png", "foo\nbar.png", "foo;rm.png", "foo$bar.png"] {
-            assert!(
-                session.resolve_screenshot_path(bad).is_err(),
-                "should reject {:?}",
-                bad
-            );
-        }
-    }
-
-    #[test]
-    fn test_session_starts_not_live() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        assert!(!session.is_live());
-    }
-
-    #[test]
-    fn test_unsupported_browser_type_rejected() {
-        let tmp = tempdir();
-        let mut cfg = empty_resolved(tmp.path().to_path_buf());
-        cfg.browser_type = "chromium".to_string();
-        let session = BrowserSession::with_resolved(cfg);
-        let err = session.page().unwrap_err();
-        assert!(matches!(err, SessionError::UnsupportedBrowserType(_)));
-    }
-
-    #[test]
-    fn test_tick_does_nothing_when_no_live_session() {
-        let tmp = tempdir();
-        let session = BrowserSession::with_resolved(empty_resolved(tmp.path().to_path_buf()));
-        assert!(!session.tick());
-    }
-
-    #[test]
-    fn test_browser_config_resolve_uses_appdata_on_windows() {
-        let cfg = BrowserConfig::default();
-        let libs: Vec<ContentLibrary> = vec![];
-        let resolved = cfg.resolve(&libs);
-        assert!(!resolved.storage_state_path.as_os_str().is_empty());
-    }
-
-    fn tempdir() -> tempfile::TempDir {
-        tempfile::tempdir().unwrap()
-    }
-}
+#[path = "browser_session_tests.rs"]
+mod tests;
 
 #[cfg(feature = "browser")]
 impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {

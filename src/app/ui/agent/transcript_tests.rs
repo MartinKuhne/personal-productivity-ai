@@ -207,7 +207,7 @@ fn test_status_events_ignored_by_transcript() {
 /// final content (quickstart scenario 3, SC-002).
 #[test]
 fn test_transcript_matches_pre_refactor_full_response() {
-    use crate::ui::render::agent_render::{format_tool_call_message, format_tool_result_message};
+    use crate::ui::agent::agent_render::{format_tool_call_message, format_tool_result_message};
     let id = test_session_id();
     let mut t = AgentTranscript::new(id);
 

@@ -63,106 +63,199 @@ fn test_parse_ical_data_unfolds_lines() {
 
 // --- json_to_ical tests ---
 
-#[test]
-fn test_json_to_ical_basic() {
-    let input = r#"{"summary":"Test","start":"2024-01-01T12:00:00","end":"2024-01-01T13:00:00","description":"desc","location":"loc"}"#;
-    let ical = json_to_ical(input, None);
-    assert!(ical.starts_with("BEGIN:VCALENDAR"));
-    assert!(ical.contains("BEGIN:VEVENT"));
-    assert!(ical.contains("END:VEVENT"));
-    assert!(ical.contains("END:VCALENDAR"));
-    assert!(ical.contains("SUMMARY:Test"));
-    assert!(ical.contains("DESCRIPTION:desc"));
-    assert!(ical.contains("LOCATION:loc"));
+/// One `json_to_ical` render case: the JSON payload, the UID override, the
+/// prefix the output must start with, and the fragments it must contain.
+struct IcalRenderCase<'a> {
+    label: &'a str,
+    json: &'a str,
+    uid: Option<&'a str>,
+    starts_with: Option<&'a str>,
+    must_contain: &'a [&'a str],
+}
+
+/// Assert one `json_to_ical` render case set.
+fn assert_ical_render(cases: Vec<IcalRenderCase<'_>>) {
+    for case in cases {
+        let IcalRenderCase {
+            label,
+            json,
+            uid,
+            starts_with,
+            must_contain,
+        } = case;
+        let ical = json_to_ical(json, uid);
+        if let Some(prefix) = starts_with {
+            assert!(
+                ical.starts_with(prefix),
+                "case '{label}': expected the iCalendar to start with '{prefix}', got:\n{ical}"
+            );
+        }
+        for fragment in must_contain {
+            assert!(
+                ical.contains(fragment),
+                "case '{label}': expected the iCalendar to contain '{fragment}', got:\n{ical}"
+            );
+        }
+    }
 }
 
 #[test]
-fn test_json_to_ical_date_only_and_invalid_json() {
-    let input = r#"{"summary":"Date Only","start":"2024-01-01","end":"2024-01-02"}"#;
-    let ical = json_to_ical(input, None);
-    assert!(ical.contains("DTSTART;VALUE=DATE:20240101"));
-    assert!(ical.contains("DTEND;VALUE=DATE:20240102"));
-
-    let invalid = "not json at all";
-    let ical_invalid = json_to_ical(invalid, None);
-    assert!(ical_invalid.contains("SUMMARY:New Event"));
-}
-
-#[test]
-fn test_json_to_ical_minimal() {
-    // Even an empty JSON should produce a valid structure
-    let input = "{}";
-    let ical = json_to_ical(input, None);
-    assert!(ical.starts_with("BEGIN:VCALENDAR"));
-    assert!(ical.contains("BEGIN:VEVENT"));
-    assert!(ical.contains("END:VEVENT"));
-    assert!(ical.contains("END:VCALENDAR"));
-    // Should have a default summary
-    assert!(ical.contains("SUMMARY:New Event"));
-}
-
-#[test]
-fn test_json_to_ical_with_uid() {
-    let input = r#"{"summary":"Test"}"#;
-    let ical = json_to_ical(input, Some("custom-uid-123"));
-    assert!(ical.contains("UID:custom-uid-123"));
-}
-
-#[test]
-fn test_json_to_ical_escapes_special_chars() {
-    let input = r#"{"summary":"Hello;World,Line1\nLine2"}"#;
-    let ical = json_to_ical(input, None);
-    assert!(ical.contains("Hello\\;World\\,Line1\\nLine2"));
+fn test_json_to_ical_renders_the_expected_lines_for_each_payload() {
+    assert_ical_render(vec![
+        IcalRenderCase {
+            label: "the full payload",
+            json: r#"{"summary":"Test","start":"2024-01-01T12:00:00","end":"2024-01-01T13:00:00","description":"desc","location":"loc"}"#,
+            uid: None,
+            starts_with: Some("BEGIN:VCALENDAR"),
+            must_contain: &[
+                "BEGIN:VEVENT",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "SUMMARY:Test",
+                "DESCRIPTION:desc",
+                "LOCATION:loc",
+            ],
+        },
+        IcalRenderCase {
+            label: "date-only start and end",
+            json: r#"{"summary":"Date Only","start":"2024-01-01","end":"2024-01-02"}"#,
+            uid: None,
+            starts_with: None,
+            must_contain: &["DTSTART;VALUE=DATE:20240101", "DTEND;VALUE=DATE:20240102"],
+        },
+        IcalRenderCase {
+            label: "invalid JSON falls back to the default summary",
+            json: "not json at all",
+            uid: None,
+            starts_with: None,
+            must_contain: &["SUMMARY:New Event"],
+        },
+        // Even an empty JSON should produce a valid structure with a default
+        // summary.
+        IcalRenderCase {
+            label: "empty JSON still produces a valid event",
+            json: "{}",
+            uid: None,
+            starts_with: Some("BEGIN:VCALENDAR"),
+            must_contain: &[
+                "BEGIN:VEVENT",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "SUMMARY:New Event",
+            ],
+        },
+        IcalRenderCase {
+            label: "an explicit UID override is emitted",
+            json: r#"{"summary":"Test"}"#,
+            uid: Some("custom-uid-123"),
+            starts_with: None,
+            must_contain: &["UID:custom-uid-123"],
+        },
+        IcalRenderCase {
+            label: "special chars are escaped",
+            json: r#"{"summary":"Hello;World,Line1\nLine2"}"#,
+            uid: None,
+            starts_with: None,
+            must_contain: &["Hello\\;World\\,Line1\\nLine2"],
+        },
+    ]);
 }
 
 // --- update_ical_string tests ---
 
-#[test]
-fn test_update_ical_string_replaces_summary() {
-    let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
-    let updates = serde_json::json!({"summary": "New"});
-    let result = update_ical_string(original, &updates);
-    assert!(result.contains("SUMMARY:New"));
-    assert!(!result.contains("SUMMARY:Old"));
+/// One `update_ical_string` case: the original iCalendar, the JSON updates and
+/// the fragments the result must and must not contain.
+struct IcalUpdateCase<'a> {
+    label: &'a str,
+    original: &'a str,
+    updates: serde_json::Value,
+    must_contain: &'a [&'a str],
+    must_not_contain: &'a [&'a str],
+}
+
+/// Assert one `update_ical_string` case set.
+fn assert_ical_update(cases: Vec<IcalUpdateCase<'_>>) {
+    for case in cases {
+        let IcalUpdateCase {
+            label,
+            original,
+            updates,
+            must_contain,
+            must_not_contain,
+        } = case;
+        let result = update_ical_string(original, &updates);
+        for fragment in must_contain {
+            assert!(
+                result.contains(fragment),
+                "case '{label}': expected the result to contain '{fragment}', got:\n{result}"
+            );
+        }
+        for fragment in must_not_contain {
+            assert!(
+                !result.contains(fragment),
+                "case '{label}': expected the result NOT to contain '{fragment}', got:\n{result}"
+            );
+        }
+    }
 }
 
 #[test]
-fn test_update_ical_string_adds_missing_field() {
-    // Test that a missing SUMMARY gets added at the end of VEVENT
-    let original =
-        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
-    let updates = serde_json::json!({
-        "summary": "Added Summary",
-        "start": "2024-05-01",
-        "end": "2024-05-02",
-        "description": "Added Desc",
-        "location": "Added Loc"
-    });
-    let result = update_ical_string(original, &updates);
-    assert!(result.contains("SUMMARY:Added Summary"));
-    assert!(result.contains("DTSTART;VALUE=DATE:20240501"));
-    assert!(result.contains("DTEND;VALUE=DATE:20240502"));
-    assert!(result.contains("DESCRIPTION:Added Desc"));
-    assert!(result.contains("LOCATION:Added Loc"));
-}
-
-#[test]
-fn test_update_ical_string_all_fields_with_folding() {
-    let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old Summary\r\n folded line\r\nDTSTART:20240101T120000\r\nDTEND:20240101T130000\r\nDESCRIPTION:Old Desc\r\n LOCATION:Old Loc\r\nEND:VEVENT\r\nEND:VCALENDAR";
-    let updates = serde_json::json!({
-        "summary": "New Summary",
-        "start": "2024-02-01T10:00:00",
-        "end": "2024-02-01T11:00:00",
-        "description": "New Desc with; special, chars\nline2",
-        "location": "New Loc"
-    });
-    let result = update_ical_string(original, &updates);
-    assert!(result.contains("SUMMARY:New Summary"));
-    assert!(result.contains("DTSTART:20240201T100000"));
-    assert!(result.contains("DTEND:20240201T110000"));
-    assert!(result.contains("DESCRIPTION:New Desc with\\; special\\, chars\\nline2"));
-    assert!(result.contains("LOCATION:New Loc"));
-    assert!(!result.contains("folded line"));
+fn test_update_ical_string_replaces_and_adds_the_requested_fields() {
+    assert_ical_update(vec![
+        IcalUpdateCase {
+            label: "replaces the summary",
+            original: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            updates: serde_json::json!({"summary": "New"}),
+            must_contain: &["SUMMARY:New"],
+            must_not_contain: &["SUMMARY:Old"],
+        },
+        IcalUpdateCase {
+            // A missing SUMMARY gets added at the end of VEVENT.
+            label: "adds fields that were missing",
+            original: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            updates: serde_json::json!({
+                "summary": "Added Summary",
+                "start": "2024-05-01",
+                "end": "2024-05-02",
+                "description": "Added Desc",
+                "location": "Added Loc"
+            }),
+            must_contain: &[
+                "SUMMARY:Added Summary",
+                "DTSTART;VALUE=DATE:20240501",
+                "DTEND;VALUE=DATE:20240502",
+                "DESCRIPTION:Added Desc",
+                "LOCATION:Added Loc",
+            ],
+            must_not_contain: &[],
+        },
+        IcalUpdateCase {
+            label: "replaces every field and drops folded continuations",
+            original: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old Summary\r\n folded line\r\nDTSTART:20240101T120000\r\nDTEND:20240101T130000\r\nDESCRIPTION:Old Desc\r\n LOCATION:Old Loc\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            updates: serde_json::json!({
+                "summary": "New Summary",
+                "start": "2024-02-01T10:00:00",
+                "end": "2024-02-01T11:00:00",
+                "description": "New Desc with; special, chars\nline2",
+                "location": "New Loc"
+            }),
+            must_contain: &[
+                "SUMMARY:New Summary",
+                "DTSTART:20240201T100000",
+                "DTEND:20240201T110000",
+                "DESCRIPTION:New Desc with\\; special\\, chars\\nline2",
+                "LOCATION:New Loc",
+            ],
+            must_not_contain: &["folded line"],
+        },
+        IcalUpdateCase {
+            label: "no updates preserves the original",
+            original: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Keep\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            updates: serde_json::json!({}),
+            must_contain: &["SUMMARY:Keep"],
+            must_not_contain: &[],
+        },
+    ]);
 }
 
 #[test]
@@ -171,14 +264,6 @@ fn test_update_ical_string_replaces_dtstart() {
     let updates = serde_json::json!({"start": "20250101"});
     let result = update_ical_string(original, &updates);
     assert!(result.contains("DTSTART;VALUE=DATE:20250101") || result.contains("DTSTART:20250101"));
-}
-
-#[test]
-fn test_update_ical_string_no_updates_preserves() {
-    let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Keep\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
-    let updates = serde_json::json!({});
-    let result = update_ical_string(original, &updates);
-    assert!(result.contains("SUMMARY:Keep"));
 }
 
 // --- CalDAV Tool Config & Client Tests (mock server) ---
@@ -1036,37 +1121,27 @@ fn dav_client_get_contact_parses_vcard() {
 }
 
 #[test]
-fn dav_client_delete_contact_204_returns_status() {
+fn dav_client_delete_contact_treats_204_and_404_as_success() {
     install_rustls_provider();
     let mock = WiremockGuard::start();
     register_carddav_stubs(&mock);
     let cfg = dav_client_config(mock.uri());
     let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
 
-    let out = client
-        .delete_contact("/alice.vcf")
-        .expect("delete_contact should succeed");
-    assert!(
-        out.contains("Deleted"),
-        "expected success message, got: {out}"
-    );
-}
-
-#[test]
-fn dav_client_delete_contact_404_treated_as_success() {
-    install_rustls_provider();
-    let mock = WiremockGuard::start();
-    register_carddav_stubs(&mock);
-    let cfg = dav_client_config(mock.uri());
-    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
-
-    let out = client
-        .delete_contact("/missing.vcf")
-        .expect("delete_contact should treat 404 as success");
-    assert!(
-        out.contains("Already absent"),
-        "expected idempotent 404 message, got: {out}"
-    );
+    // A 204 is a plain delete; a 404 is reported as an idempotent no-op.
+    let cases = [
+        ("/alice.vcf", "Deleted"),
+        ("/missing.vcf", "Already absent"),
+    ];
+    for (href, expected) in cases {
+        let out = client
+            .delete_contact(href)
+            .unwrap_or_else(|err| panic!("href '{href}' should succeed, got: {err}"));
+        assert!(
+            out.contains(expected),
+            "href '{href}': expected an idempotent success message, got: {out}"
+        );
+    }
 }
 
 #[test]
@@ -1312,5 +1387,806 @@ fn dav_client_update_contact_put_failure() {
     assert!(
         err.contains("Failed to PUT updated contact"),
         "error should mention the update PUT failure, got: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DavClient construction and URL resolution
+// ---------------------------------------------------------------------------
+
+fn caldav_client_at(uri: String) -> DavClient {
+    let cfg = dav_client_config(uri);
+    DavClient::new("primary".to_string(), &cfg).expect("build DavClient")
+}
+
+fn raw_client_with_url(url: &str) -> crate::config::CalDavClient {
+    crate::config::CalDavClient {
+        url: url.to_string(),
+        username: "user".to_string(),
+        password: "password".to_string(),
+    }
+}
+
+#[test]
+fn dav_client_new_rejects_a_non_http_url() {
+    install_rustls_provider();
+    // `DavClient` is not `Debug`, so this cannot use `expect_err`.
+    let err = match DavClient::new(
+        "c".to_string(),
+        &raw_client_with_url("ftp://example.invalid/dav"),
+    ) {
+        Ok(_) => panic!("a non-HTTP scheme must be rejected"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err,
+        "Client config error: invalid URL 'ftp://example.invalid/dav'"
+    );
+}
+
+#[test]
+fn dav_client_new_accepts_both_http_schemes() {
+    install_rustls_provider();
+    let plain = DavClient::new(
+        "a".to_string(),
+        &raw_client_with_url("http://example.invalid"),
+    );
+    assert!(plain.is_ok(), "http:// must be accepted");
+    let secure = DavClient::new(
+        "b".to_string(),
+        &raw_client_with_url("https://example.invalid"),
+    );
+    assert!(secure.is_ok(), "https:// must be accepted");
+    assert_eq!(secure.unwrap().name(), "b");
+}
+
+#[test]
+fn dav_client_resolve_url_passes_an_absolute_href_through() {
+    // `GET {id}` with a fully-qualified href must not be joined onto the
+    // base URL — the request must land on the mock server as-is.
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    let absolute = format!("{}/item1.ics", mock.uri());
+    let item = client
+        .get_calendar_item(&absolute)
+        .expect("an absolute href should resolve unchanged");
+    assert_eq!(item.summary.as_deref(), Some("Existing Item"));
+    assert_eq!(item.href, absolute);
+}
+
+#[test]
+fn dav_client_resolve_url_joins_a_relative_path_onto_the_base() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    // A base URL with a path segment: the relative href must be resolved
+    // against it rather than appended blindly.
+    let client = caldav_client_at(format!("{}/dav", mock.uri()));
+    let item = client
+        .get_calendar_item("/item1.ics")
+        .expect("the joined URL should still reach the mock");
+    assert_eq!(item.summary.as_deref(), Some("Existing Item"));
+}
+
+#[test]
+fn dav_client_resolve_url_falls_back_when_the_base_cannot_be_parsed() {
+    // `"http://["` passes the scheme check in `new` but is not a URL
+    // `url::Url` can parse, so `resolve_url` takes its manual
+    // string-concatenation fallback. The resulting request then fails at
+    // the transport layer rather than panicking.
+    install_rustls_provider();
+    let client = DavClient::new("c".to_string(), &raw_client_with_url("http://[")).unwrap();
+    let err = client
+        .get_calendar_item("/item.ics")
+        .expect_err("an unparseable base cannot produce a request");
+    assert!(!err.is_empty(), "expected a transport error");
+    assert!(
+        !err.contains("Not found by href"),
+        "this must be a transport failure, not an HTTP status: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DavClient protocol-method error statuses
+// ---------------------------------------------------------------------------
+
+fn register_status(mock: &WiremockGuard, method_name: &'static str, status: u16, body: &str) {
+    mock.register(
+        Mock::given(method(method_name)).respond_with(
+            ResponseTemplate::new(status)
+                .insert_header("content-type", "text/plain")
+                .set_body_string(body),
+        ),
+    );
+}
+
+#[test]
+fn dav_client_list_calendars_reports_a_non_2xx_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "PROPFIND", 403, "forbidden");
+    let client = caldav_client_at(mock.uri());
+
+    let err = crate::tools::blocking::block_on(client.list_calendars("/"))
+        .expect_err("403 must be an error");
+    assert_eq!(err.to_string(), "PROPFIND calendars failed: 403 Forbidden");
+}
+
+#[test]
+fn dav_client_list_calendars_returns_the_parsed_hrefs() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    let hrefs = crate::tools::blocking::block_on(client.list_calendars("/")).unwrap();
+    assert_eq!(hrefs, vec!["/calendars/primary/".to_string()]);
+}
+
+/// A multistatus advertising a calendar-home-set at `href`.
+fn cal_home_set_body(href: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response><d:propstat><d:prop>
+  <c:calendar-home-set><d:href>{href}</d:href></c:calendar-home-set>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+/// A multistatus advertising a current-user-principal at `href`.
+fn principal_body(href: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response><d:propstat><d:prop>
+  <d:current-user-principal><d:href>{href}</d:href></d:current-user-principal>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+/// A multistatus carrying both a calendar-home-set and a principal.
+fn home_set_and_principal_body(home: &str, principal: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response><d:propstat><d:prop>
+  <c:calendar-home-set><d:href>{home}</d:href></c:calendar-home-set>
+  <d:current-user-principal><d:href>{principal}</d:href></d:current-user-principal>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+/// A well-formed multistatus with no children at all.
+const EMPTY_MULTISTATUS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+</d:multistatus>"#;
+
+fn xml_207(body: &str) -> ResponseTemplate {
+    ResponseTemplate::new(207)
+        .insert_header("content-type", "application/xml")
+        .set_body_string(body.to_string())
+}
+
+fn propfind_at(mock: &WiremockGuard, path: &str, body: &str) {
+    mock.register(
+        Mock::given(method("PROPFIND"))
+            .and(wm_path(path))
+            .respond_with(xml_207(body)),
+    );
+}
+
+#[test]
+fn dav_client_discover_calendar_home_set_returns_hrefs() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", &cal_home_set_body("/calendars/user/"));
+    let client = caldav_client_at(mock.uri());
+
+    let homes = crate::tools::blocking::block_on(client.discover_calendar_home_set("/")).unwrap();
+    assert_eq!(homes, vec!["/calendars/user/".to_string()]);
+}
+
+#[test]
+fn dav_client_discover_calendar_home_set_reports_a_non_2xx_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "PROPFIND", 401, "nope");
+    let client = caldav_client_at(mock.uri());
+
+    let err = crate::tools::blocking::block_on(client.discover_calendar_home_set("/"))
+        .expect_err("401 must be an error");
+    assert_eq!(
+        err.to_string(),
+        "PROPFIND calendar-home-set failed: 401 Unauthorized"
+    );
+}
+
+#[test]
+fn dav_client_discover_current_user_principal_returns_the_href() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", &principal_body("/principals/me/"));
+    let client = caldav_client_at(mock.uri());
+
+    let principal =
+        crate::tools::blocking::block_on(client.discover_current_user_principal()).unwrap();
+    assert_eq!(principal.as_deref(), Some("/principals/me/"));
+}
+
+#[test]
+fn dav_client_discover_current_user_principal_is_none_without_the_property() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", EMPTY_MULTISTATUS);
+    let client = caldav_client_at(mock.uri());
+
+    let principal =
+        crate::tools::blocking::block_on(client.discover_current_user_principal()).unwrap();
+    assert_eq!(principal, None);
+}
+
+#[test]
+fn dav_client_discover_current_user_principal_swallows_a_bad_status() {
+    // Unlike the other discovery helpers this one answers `Ok(None)` on a
+    // non-2xx status so callers can keep falling through.
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "PROPFIND", 500, "boom");
+    let client = caldav_client_at(mock.uri());
+
+    let principal =
+        crate::tools::blocking::block_on(client.discover_current_user_principal()).unwrap();
+    assert_eq!(principal, None);
+}
+
+#[test]
+fn dav_client_calendar_query_timerange_reports_a_non_2xx_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "REPORT", 403, "nope");
+    let client = caldav_client_at(mock.uri());
+
+    let err = crate::tools::blocking::block_on(client.calendar_query_timerange(
+        "/calendars/primary/",
+        "VEVENT",
+        None,
+        None,
+    ))
+    .expect_err("403 must be an error");
+    assert_eq!(
+        err.to_string(),
+        "REPORT calendar-query failed: 403 Forbidden"
+    );
+}
+
+#[test]
+fn dav_client_calendar_query_timerange_keeps_items_without_calendar_data() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("REPORT")).respond_with(xml_207(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response><d:href>/calendars/primary/no-data.ics</d:href>
+  <d:propstat><d:prop/><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>
+ </d:response>
+ <d:response><d:propstat><d:prop/><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+</d:multistatus>"#,
+        )),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let items = crate::tools::blocking::block_on(client.calendar_query_timerange(
+        "/calendars/primary/",
+        "VEVENT",
+        None,
+        None,
+    ))
+    .unwrap();
+    // The response without an href is dropped; the one without
+    // calendar-data survives with `None`.
+    assert_eq!(items.len(), 1, "got: {items:?}");
+    assert_eq!(items[0].href, "/calendars/primary/no-data.ics");
+    assert_eq!(items[0].calendar_data, None);
+}
+
+// ---------------------------------------------------------------------------
+// list_calendar_hrefs discovery strategies (driven through search_calendar)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dav_client_search_calendar_discovers_through_the_home_set() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    // The base URL is not itself a calendar collection but advertises a
+    // calendar-home-set.
+    propfind_at(&mock, "/", &cal_home_set_body("/calendars/user/"));
+    propfind_at(&mock, "/calendars/user/", PROPFIND_BODY);
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(REPORT_BODY)));
+    let client = caldav_client_at(mock.uri());
+
+    let events = client
+        .search_calendar("Bob")
+        .expect("search should succeed");
+    assert_eq!(events.len(), 1, "got: {events:?}");
+    assert_eq!(events[0].summary.as_deref(), Some("Meeting with Bob"));
+}
+
+#[test]
+fn dav_client_search_calendar_discovers_through_the_principal() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", &principal_body("/principals/me/"));
+    propfind_at(
+        &mock,
+        "/principals/me/",
+        &cal_home_set_body("/calendars/user/"),
+    );
+    propfind_at(&mock, "/calendars/user/", PROPFIND_BODY);
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(REPORT_BODY)));
+    let client = caldav_client_at(mock.uri());
+
+    let events = client
+        .search_calendar("bob")
+        .expect("search should succeed");
+    assert_eq!(events.len(), 1, "got: {events:?}");
+}
+
+#[test]
+fn dav_client_search_calendar_falls_back_to_the_fastmail_guess() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    // Nothing discoverable on the base URL; the guessed
+    // /dav/principals/user/{username}/ path carries the home set.
+    propfind_at(&mock, "/", EMPTY_MULTISTATUS);
+    propfind_at(
+        &mock,
+        "/dav/principals/user/user/",
+        &cal_home_set_body("/calendars/user/"),
+    );
+    propfind_at(&mock, "/calendars/user/", PROPFIND_BODY);
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(REPORT_BODY)));
+    let client = caldav_client_at(mock.uri());
+
+    let events = client
+        .search_calendar("MEETING WITH BOB")
+        .expect("the keyword match is case-insensitive");
+    assert_eq!(events.len(), 1, "got: {events:?}");
+}
+
+#[test]
+fn dav_client_search_calendar_errors_when_no_principal_is_found() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", EMPTY_MULTISTATUS);
+    propfind_at(&mock, "/dav/principals/user/user/", EMPTY_MULTISTATUS);
+    let client = caldav_client_at(mock.uri());
+
+    let err = client.search_calendar("Bob").expect_err("no principal");
+    assert_eq!(err, "No principal found");
+}
+
+#[test]
+fn dav_client_search_calendar_errors_when_no_home_is_found() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", &principal_body("/principals/me/"));
+    propfind_at(&mock, "/principals/me/", EMPTY_MULTISTATUS);
+    let client = caldav_client_at(mock.uri());
+
+    let err = client.search_calendar("Bob").expect_err("no home set");
+    assert_eq!(err, "No calendar home found");
+}
+
+#[test]
+fn dav_client_search_calendar_returns_no_matches_when_the_home_has_no_calendars() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    // Discovery succeeds end to end, but the home set is empty, so the
+    // REPORT leg is never reached.
+    propfind_at(
+        &mock,
+        "/",
+        &home_set_and_principal_body("/calendars/user/", "/principals/me/"),
+    );
+    propfind_at(&mock, "/calendars/user/", EMPTY_MULTISTATUS);
+    propfind_at(
+        &mock,
+        "/principals/me/",
+        &cal_home_set_body("/calendars/user/"),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let events = client.search_calendar("Bob").unwrap();
+    assert!(events.is_empty(), "got: {events:?}");
+}
+
+#[test]
+fn dav_client_search_calendar_skips_items_without_calendar_data() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    // A REPORT whose single item carries no calendar-data: nothing can
+    // match the keyword, so the result set stays empty.
+    // `register_caldav_stubs` already mounts a catch-all REPORT stub, and
+    // wiremock breaks priority ties by insertion order (first mounted wins),
+    // so this stub needs a higher priority to answer for this path at all.
+    mock.register(
+        Mock::given(method("REPORT"))
+            .and(wm_path("/calendars/primary/"))
+            .respond_with(xml_207(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response><d:href>/calendars/primary/blank.ics</d:href>
+  <d:propstat><d:prop/><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+ </d:response>
+</d:multistatus>"#,
+            ))
+            .with_priority(1),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let events = client.search_calendar("Bob").unwrap();
+    assert!(events.is_empty(), "got: {events:?}");
+}
+
+#[test]
+fn dav_client_get_calendar_accepts_preformatted_dates() {
+    // Dates that are not `YYYY-MM-DD` are passed to the REPORT untouched.
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    let events = client
+        .get_calendar("20240101T000000Z", "20240102T000000Z")
+        .expect("get_calendar should succeed");
+    assert_eq!(events.len(), 1, "got: {events:?}");
+}
+
+#[test]
+fn dav_client_get_calendar_propagates_a_report_failure() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", PROPFIND_BODY);
+    register_status(&mock, "REPORT", 500, "boom");
+    let client = caldav_client_at(mock.uri());
+
+    let err = client
+        .get_calendar("2024-01-01", "2024-01-02")
+        .expect_err("the REPORT failure must surface");
+    assert!(
+        err.contains("REPORT calendar-query failed: 500"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn dav_client_add_calendar_item_errors_when_no_calendar_exists() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    // Discovery succeeds all the way to a home set, but the home set
+    // contains no calendar collections at all.
+    propfind_at(
+        &mock,
+        "/",
+        &home_set_and_principal_body("/calendars/user/", "/principals/me/"),
+    );
+    propfind_at(&mock, "/calendars/user/", EMPTY_MULTISTATUS);
+    propfind_at(
+        &mock,
+        "/principals/me/",
+        &cal_home_set_body("/calendars/user/"),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let err = client
+        .add_calendar_item(r#"{"summary":"X"}"#)
+        .expect_err("there is nothing to add to");
+    assert_eq!(err, "No calendar found to add to");
+}
+
+#[test]
+fn dav_client_update_calendar_item_treats_invalid_json_as_an_empty_update() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    let out = client
+        .update_calendar_item("/item1.ics", "definitely not json")
+        .expect("the PUT should still go through");
+    assert_eq!(out, "Updated successfully");
+}
+
+#[test]
+fn dav_client_update_calendar_item_reports_a_failed_get() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    let err = client
+        .update_calendar_item("/notfound", r#"{"summary":"X"}"#)
+        .expect_err("the GET must fail first");
+    assert!(
+        err.contains("Failed to fetch event for update: 404"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn dav_client_delete_calendar_item_succeeds_on_2xx() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let client = caldav_client_at(mock.uri());
+
+    assert_eq!(client.delete_calendar_item("/item1.ics"), Ok(()));
+}
+
+// ---------------------------------------------------------------------------
+// CardDAV protocol methods on DavClient
+// ---------------------------------------------------------------------------
+
+const ADDRESSBOOK_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/</d:href>
+  <d:propstat><d:prop>
+   <d:resourcetype><d:collection/><c:addressbook/></d:resourcetype>
+  </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+ </d:response>
+</d:multistatus>"#;
+
+const ADDRESSBOOK_REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/alice.vcf</d:href>
+  <d:propstat><d:prop>
+   <c:address-data>BEGIN:VCARD
+VERSION:3.0
+FN:Alice Example
+UID:alice-1
+END:VCARD</c:address-data>
+  </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
+ </d:response>
+ <d:response>
+  <d:href>/addressbooks/primary/no-data.vcf</d:href>
+  <d:propstat><d:prop/><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>
+ </d:response>
+</d:multistatus>"#;
+
+fn addressbook_home_set_body(href: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response><d:propstat><d:prop>
+  <c:addressbook-home-set><d:href>{href}</d:href></c:addressbook-home-set>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+#[test]
+fn dav_client_list_addressbooks_returns_hrefs() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", ADDRESSBOOK_PROPFIND_BODY);
+    let client = caldav_client_at(mock.uri());
+
+    let books = crate::tools::blocking::block_on(client.list_addressbooks("/")).unwrap();
+    assert_eq!(books, vec!["/addressbooks/primary/".to_string()]);
+}
+
+#[test]
+fn dav_client_list_addressbooks_reports_a_non_2xx_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "PROPFIND", 403, "nope");
+    let client = caldav_client_at(mock.uri());
+
+    let err = crate::tools::blocking::block_on(client.list_addressbooks("/"))
+        .expect_err("403 must be an error");
+    assert_eq!(
+        err.to_string(),
+        "PROPFIND addressbooks failed: 403 Forbidden"
+    );
+}
+
+#[test]
+fn dav_client_discover_addressbook_home_set_returns_hrefs() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(
+        &mock,
+        "/",
+        &addressbook_home_set_body("/addressbooks/user/"),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let homes =
+        crate::tools::blocking::block_on(client.discover_addressbook_home_set("/")).unwrap();
+    assert_eq!(homes, vec!["/addressbooks/user/".to_string()]);
+}
+
+#[test]
+fn dav_client_discover_addressbook_home_set_reports_a_non_2xx_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "PROPFIND", 401, "nope");
+    let client = caldav_client_at(mock.uri());
+
+    let err = crate::tools::blocking::block_on(client.discover_addressbook_home_set("/"))
+        .expect_err("401 must be an error");
+    assert_eq!(
+        err.to_string(),
+        "PROPFIND addressbook-home-set failed: 401 Unauthorized"
+    );
+}
+
+#[test]
+fn dav_client_fetch_contacts_from_book_uses_the_sync_report() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(ADDRESSBOOK_REPORT_BODY)));
+    let client = caldav_client_at(mock.uri());
+
+    let contacts =
+        crate::tools::blocking::block_on(client.fetch_contacts_from_book("/addressbooks/primary/"))
+            .unwrap();
+    // The second response has no address-data and must be dropped.
+    assert_eq!(contacts.len(), 1, "got: {contacts:?}");
+    assert_eq!(contacts[0].0, "/addressbooks/primary/alice.vcf");
+    assert!(contacts[0].1.contains("FN:Alice Example"));
+}
+
+#[test]
+fn dav_client_fetch_contacts_from_book_falls_back_to_addressbook_query() {
+    use wiremock::matchers::body_string_contains;
+
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    // The sync-collection REPORT is rejected; the plain
+    // addressbook-query REPORT is the fallback and must succeed.
+    mock.register(
+        Mock::given(method("REPORT"))
+            .and(body_string_contains("sync-collection"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("sync unsupported"),
+            ),
+    );
+    mock.register(
+        Mock::given(method("REPORT"))
+            .and(body_string_contains("addressbook-query"))
+            .respond_with(xml_207(ADDRESSBOOK_REPORT_BODY)),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let contacts =
+        crate::tools::blocking::block_on(client.fetch_contacts_from_book("/addressbooks/primary/"))
+            .unwrap();
+    assert_eq!(contacts.len(), 1, "got: {contacts:?}");
+    assert_eq!(contacts[0].0, "/addressbooks/primary/alice.vcf");
+}
+
+#[test]
+fn dav_client_fetch_contacts_from_book_errors_when_both_reports_fail() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_status(&mock, "REPORT", 403, "nope");
+    let client = caldav_client_at(mock.uri());
+
+    let err =
+        crate::tools::blocking::block_on(client.fetch_contacts_from_book("/addressbooks/primary/"))
+            .expect_err("both REPORTs fail");
+    assert_eq!(
+        err.to_string(),
+        "REPORT addressbook-query failed: 403 Forbidden"
+    );
+}
+
+#[test]
+fn dav_client_search_contact_matches_case_insensitively() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", ADDRESSBOOK_PROPFIND_BODY);
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(ADDRESSBOOK_REPORT_BODY)));
+    let client = caldav_client_at(mock.uri());
+
+    let hits = client.search_contact("ALICE EXAMPLE").unwrap();
+    assert_eq!(hits.len(), 1, "got: {hits:?}");
+    assert_eq!(hits[0].fn_name.as_deref(), Some("Alice Example"));
+    assert_eq!(hits[0].client, "primary");
+
+    let misses = client.search_contact("nobody").unwrap();
+    assert!(misses.is_empty(), "got: {misses:?}");
+}
+
+#[test]
+fn dav_client_add_contact_returns_the_created_path() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", ADDRESSBOOK_PROPFIND_BODY);
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(201)
+                .insert_header("ETag", "\"new\"")
+                .set_body_string(""),
+        ),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let out = client
+        .add_contact(r#"{"name":"Bob","email":"bob@example.com"}"#)
+        .expect("add_contact should succeed");
+    assert!(
+        out.starts_with("Created at /addressbooks/primary/"),
+        "got: {out}"
+    );
+    assert!(out.ends_with(".vcf"), "got: {out}");
+}
+
+#[test]
+fn dav_client_update_contact_without_an_etag_puts_unconditionally() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("GET")).respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/vcard")
+                .set_body_string(CARD_ALICE_VCF),
+        ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(ResponseTemplate::new(200).set_body_string("")),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let out = client
+        .update_contact("/alice.vcf", r#"{"email":"new@example.com"}"#)
+        .expect("the unconditional PUT should succeed");
+    assert_eq!(out, "Updated (status 200 OK)");
+}
+
+#[test]
+fn dav_client_delete_contact_reports_the_status_on_success() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("DELETE")).respond_with(ResponseTemplate::new(200).set_body_string("")),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let out = client.delete_contact("/alice.vcf").unwrap();
+    assert_eq!(out, "Deleted (status 200 OK)");
+}
+
+#[test]
+fn dav_client_delete_contact_reports_the_body_on_failure() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("DELETE")).respond_with(
+            ResponseTemplate::new(403)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("forbidden body"),
+        ),
+    );
+    let client = caldav_client_at(mock.uri());
+
+    let err = client.delete_contact("/alice.vcf").unwrap_err();
+    assert_eq!(
+        err,
+        "Failed to DELETE contact: 403 Forbidden - forbidden body"
     );
 }

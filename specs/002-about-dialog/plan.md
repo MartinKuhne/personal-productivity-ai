@@ -4,9 +4,15 @@
 
 **Input**: Feature specification from `/specs/002-about-dialog/spec.md`
 
+> **History (2026-10-31)**: this plan describes the original **egui** design
+> (`egui::Window`, `eframe::Storage`, hover tooltip). The feature now ships on
+> iced; read the [spec's Amendments](spec.md#amendments) for what is actually
+> built. The names and counts below have been corrected to the shipped values,
+> but the design narrative is left as it was written.
+
 ## Summary
 
-Add an About Dialog reachable from the top toolbar hamburger menu (☰) that displays application identity ("FastMD Viewer", "Copyright (c) 2026 Martin Kuhne"), compile-time build metadata (git branch, 7–8 char short commit hash with full 40-char hash on hover tooltip and click-to-copy to clipboard, build date YYYY-MM-DD), the full MIT LICENSE text in a capped scroll area, and a structured attribution list of all 58 direct third-party crate dependencies across the four workspace members with crate name, authors, and GitHub URL. The dialog also opens automatically on first start: a version-stamped flag in the existing `PersistedUiState` (via `eframe::Storage`, never the config file) records the app version the dialog was last shown for, so fresh installs and each upgrade's first start auto-open it exactly once. Approach: capture git metadata at compile time via `build.rs` (`cargo:rustc-env`), route dialog opening through the unified `Bus<UserCommand>` (`OpenAboutDialog`) per FMD-068, centralize UI literals in `strings.rs`, store open/closed state in `Dialogs.about_dialog_open`, render with `egui::Window` + two `ScrollArea`s, expose attributions as a curated static `Attribution` catalog with completeness tests, and evaluate a pure `should_auto_show_about(recorded, current)` helper at startup in `FastMdApp::new` after `PersistedUiState` restore.
+Add an About Dialog reachable from the top toolbar hamburger menu (☰) that displays application identity ("FastMD AI", "Copyright (c) 2026 Martin Kuhne"), compile-time build metadata (git branch, 7–8 char short commit hash with full 40-char hash on hover tooltip and click-to-copy to clipboard, build date YYYY-MM-DD), the full MIT LICENSE text in a capped scroll area, and a structured attribution list of all 61 direct third-party crate dependencies across the four workspace members with crate name, authors, and GitHub URL. The dialog also opens automatically on first start: a version-stamped flag in the existing `PersistedUiState` (via `eframe::Storage`, never the config file) records the app version the dialog was last shown for, so fresh installs and each upgrade's first start auto-open it exactly once. Approach: capture git metadata at compile time via `build.rs` (`cargo:rustc-env`), route dialog opening through the unified `Bus<UserCommand>` (`OpenAboutDialog`) per FMD-068, centralize UI literals in `strings.rs`, store open/closed state in `Dialogs.about_dialog_open`, render with `egui::Window` + two `ScrollArea`s, expose attributions as a curated static `Attribution` catalog with completeness tests, and evaluate a pure `should_auto_show_about(recorded, current)` helper at startup in `FastMdApp::new` after `PersistedUiState` restore.
 
 ## Technical Context
 
@@ -26,7 +32,7 @@ Add an About Dialog reachable from the top toolbar hamburger menu (☰) that dis
 
 **Constraints**: UI MUST remain responsive per FMD-060/FMD-061; no blocking I/O on UI thread; attribution catalog is static (no network fetch at runtime); build must succeed offline with graceful fallbacks ("unknown"); license text must be embedded at compile time.
 
-**Scale/Scope**: One modal dialog, two scroll areas, 58 attributions, 13 new string constants, 2 new modules (`about_dialog`, `attributions`), 1 enum variant, 1 dialog flag, 1 persisted `Option<String>` flag + 1 pure startup helper; no database or network.
+**Scale/Scope**: One modal dialog, two scroll areas, 61 attributions, 13 new string constants, 2 new modules (`about_dialog`, `attributions`), 1 enum variant, 1 dialog flag, 1 persisted `Option<String>` flag + 1 pure startup helper; no database or network.
 
 ## Constitution Check
 
@@ -37,7 +43,7 @@ Add an About Dialog reachable from the top toolbar hamburger menu (☰) that dis
 | I. Testability | PASS | Modular pure helpers (`apply_about_button_click`, `Attribution` catalog invariants, `should_auto_show_about(recorded, current)`, `commit_tooltip_text`) + unit tests for strings/dialogs state + first-run matrix (fresh/ same-version/ upgraded/ unwritable-storage) + attribution completeness + `egui_kittest` smoke/click tests for dialog and hamburger menu; no side effects in helpers |
 | II. Security | PASS | No user input parsed; attribution URLs are static https strings validated by test (`starts_with https://github.com/`); clipboard write uses toolkit API; `open_url`/`webbrowser` guarded by not crashing on failure; no secrets or PII logged |
 | III. Modularity | PASS | Two new bounded modules (`ui::attributions`, `ui::about_dialog`) each single concern; `Dialogs` and `UserCommand` are existing seams; no mass refactor — small additive change only |
-| IV. Open Source Leverage | PASS | Uses existing crates only (`arboard`, `egui`, `chrono`); attribution catalog acknowledges 58 OSS dependencies rather than reimplementing |
+| IV. Open Source Leverage | PASS | Uses existing crates only (`arboard`, `egui`, `chrono`); attribution catalog acknowledges 61 OSS dependencies rather than reimplementing |
 | V. SDLC Best Practices | PASS | `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt --check`, `cargo doc`, `cargo nextest` required; tests must be added for new branches; warnings fixed before merge; requirements traceable to spec FRs |
 
 **Gate result**: PASS — no violations requiring justification.
@@ -72,7 +78,7 @@ src/app/
 │   ├── app/mod.rs                          # [MODIFY] save() persists the recorded version (no new logic — flag rides along)
 │   ├── panels/top.rs                       # [MODIFY] hamburger menu About button + helper — verify remaining wiring
 │   ├── panels/top_tests.rs                 # [MODIFY] Tier-4 click test for About
-│   ├── attributions.rs                     # [NEW] Attribution struct + DIRECT_DEPENDENCIES[58]
+│   ├── attributions.rs                     # [NEW] Attribution struct + DIRECT_DEPENDENCIES[61]
 │   ├── attributions_tests.rs               # [NEW] invariants + completeness test
 │   ├── about_dialog.rs                     # [NEW] show_about_dialog() with include_str LICENSE + env! metadata
 │   ├── about_dialog_tests.rs               # [NEW] smoke + content + clipboard + close tests

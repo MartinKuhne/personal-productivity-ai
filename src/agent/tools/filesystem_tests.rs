@@ -116,42 +116,53 @@ fn test_tool_read_note_not_found() {
     assert!(result.unwrap_err().contains("Failed to read file"));
 }
 
+/// `tool_window_note` slices a file by the 0-indexed `offset` / `limit` pair and
+/// stays forgiving at every boundary: `offset = 0` is the first line (an error
+/// pre-migration), an offset past the end and a zero limit both yield empty
+/// content instead of an error.
 #[test]
-fn test_tool_window_note() {
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
+fn test_tool_window_note_slices_by_offset_and_limit() {
+    let cases: Vec<(&str, &str, usize, usize, &str)> = vec![
+        (
+            "0-indexed: skip line 1, return 2 lines",
+            "Line 1\nLine 2\nLine 3\nLine 4",
+            1,
+            2,
+            "Line 2\nLine 3",
+        ),
+        (
+            "BOUNDARY: offset=0 is the first line",
+            "Line 1\nLine 2",
+            0,
+            1,
+            "Line 1",
+        ),
+        ("empty file", "", 0, 50, ""),
+        (
+            "BOUNDARY: offset past the end returns empty",
+            "Line 1\nLine 2\nLine 3",
+            999,
+            100,
+            "",
+        ),
+        (
+            "BOUNDARY: limit=0 returns empty without erroring",
+            "Line 1\nLine 2",
+            0,
+            0,
+            "",
+        ),
+    ];
+    for (label, content, offset, limit, expected) in cases {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, content).unwrap();
 
-    // 0-indexed: skip "Line 1", return the next 2 lines.
-    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 1, 2)
-        .unwrap()
-        .content;
-    assert_eq!(result, "Line 2\nLine 3");
-}
-
-#[test]
-fn test_tool_window_note_offset_zero() {
-    // BOUNDARY: offset=0 is the first line (was an error pre-migration).
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 1)
-        .unwrap()
-        .content;
-    assert_eq!(result, "Line 1");
-}
-
-#[test]
-fn test_tool_window_note_empty_file() {
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("empty.md");
-    fs::write(&file_path, "").unwrap();
-
-    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 50)
-        .unwrap()
-        .content;
-    assert_eq!(result, "");
+        let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), offset, limit)
+            .unwrap()
+            .content;
+        assert_eq!(result, expected, "case '{label}': windowed content");
+    }
 }
 
 #[test]
@@ -176,22 +187,39 @@ fn test_tool_create_note() {
     assert!(content.contains("# Hello"));
 }
 
+/// NEGATIVE: `tool_create_note` accepts only the `.md` extension and rejects
+/// every other spelling before it touches the filesystem.
 #[test]
-fn test_tool_create_note_invalid_extension() {
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("new.txt");
+fn test_tool_create_note_rejects_non_md_extensions() {
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("`.txt` is rejected", "new.txt", "content"),
+        (
+            "`.markdown` is rejected, only `.md` is allowed",
+            "new.markdown",
+            "# Hello",
+        ),
+    ];
+    for (label, file_name, content) in cases {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join(file_name);
 
-    let producer = noop_producer();
-    let result = tool_create_note(
-        &test_ctx(),
-        file_path.to_str().unwrap(),
-        "content",
-        &*producer,
-    );
-    assert_eq!(
-        result.unwrap_err(),
-        "Only markdown files (.md) are allowed."
-    );
+        let producer = noop_producer();
+        let result = tool_create_note(
+            &test_ctx(),
+            file_path.to_str().unwrap(),
+            content,
+            &*producer,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "Only markdown files (.md) are allowed.",
+            "case '{label}'"
+        );
+        assert!(
+            !file_path.exists(),
+            "case '{label}': nothing may be written"
+        );
+    }
 }
 
 #[test]
@@ -234,69 +262,54 @@ fn test_tool_create_note_fails_if_exists() {
     assert_eq!(content, "existing content");
 }
 
+/// `tool_insert_into_note` splices the given lines in at the 0-indexed
+/// `offset`: offset 0 inserts at the top and `offset == lines.len()` appends.
 #[test]
-fn test_tool_insert_into_note() {
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
+fn test_tool_insert_into_note_splices_lines_at_the_offset() {
+    let cases: Vec<(&str, &str, usize, &[&str], &str)> = vec![
+        (
+            "0-indexed: insert between line 1 and line 2",
+            "Line 1\nLine 2\nLine 3",
+            1,
+            &["New Line"],
+            "Line 1\nNew Line\nLine 2\nLine 3",
+        ),
+        (
+            "BOUNDARY: offset=0 inserts at the top",
+            "Line 1\nLine 2",
+            0,
+            &["New"],
+            "New\nLine 1\nLine 2",
+        ),
+        (
+            "BOUNDARY: offset == lines.len() appends to the end",
+            "Line 1\nLine 2",
+            2,
+            &["New"],
+            "Line 1\nLine 2\nNew",
+        ),
+    ];
+    for (label, initial, offset, inserted, expected) in cases {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, initial).unwrap();
 
-    let producer = noop_producer();
-    // 0-indexed: insert at position 1 (between "Line 1" and "Line 2").
-    let result = tool_insert_into_note(
-        &test_ctx(),
-        file_path.to_str().unwrap(),
-        1,
-        &["New Line".to_string()],
-        &*producer,
-    )
-    .unwrap()
-    .result;
-    assert_eq!(result, "Lines inserted successfully.");
+        let producer = noop_producer();
+        let lines: Vec<String> = inserted.iter().map(|line| (*line).to_string()).collect();
+        let result = tool_insert_into_note(
+            &test_ctx(),
+            file_path.to_str().unwrap(),
+            offset,
+            &lines,
+            &*producer,
+        )
+        .unwrap()
+        .result;
+        assert_eq!(result, "Lines inserted successfully.", "case '{label}'");
 
-    let content = fs::read_to_string(&file_path).unwrap();
-    assert_eq!(content, "Line 1\nNew Line\nLine 2\nLine 3");
-}
-
-#[test]
-fn test_tool_insert_into_note_at_top() {
-    // BOUNDARY: offset=0 inserts at the top of the file.
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-    let producer = noop_producer();
-    let result = tool_insert_into_note(
-        &test_ctx(),
-        file_path.to_str().unwrap(),
-        0,
-        &["New".to_string()],
-        &*producer,
-    );
-    assert!(result.is_ok());
-
-    let content = fs::read_to_string(&file_path).unwrap();
-    assert_eq!(content, "New\nLine 1\nLine 2");
-}
-
-#[test]
-fn test_tool_insert_into_note_at_end() {
-    // BOUNDARY: offset == lines.len() appends to the end.
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-    let producer = noop_producer();
-    let result = tool_insert_into_note(
-        &test_ctx(),
-        file_path.to_str().unwrap(),
-        2,
-        &["New".to_string()],
-        &*producer,
-    );
-    assert!(result.is_ok());
-
-    let content = fs::read_to_string(&file_path).unwrap();
-    assert_eq!(content, "Line 1\nLine 2\nNew");
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, expected, "case '{label}': body after insert");
+    }
 }
 
 #[test]
@@ -358,29 +371,66 @@ fn test_list_files_by_tag_returns_all_sorted_when_no_paging_in_tool() {
     assert!(res[4].ends_with("file_004.md"));
 }
 
+/// `tool_list_notes_by_tag` returns exactly the Markdown (`.md` / `.markdown`)
+/// files whose front matter carries the requested tag, and nothing else.
 #[test]
-fn test_list_files_by_tag_no_matches_returns_empty() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("solo.md"), "---\ntags: [other]\n---\n# x\n").unwrap();
-    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "meeting").unwrap();
-    assert!(res.is_empty());
-}
+fn test_list_files_by_tag_matches_only_markdown_files_carrying_the_tag() {
+    /// One tag-listing case: `(label, files as (name, front-matter), tag,
+    /// expected hit count, expected single hit name)`.
+    type TagCase<'a> = (
+        &'a str,
+        Vec<(&'a str, &'a str)>,
+        &'a str,
+        usize,
+        Option<&'a str>,
+    );
+    let cases: Vec<TagCase<'_>> = vec![
+        (
+            "no file carries the tag",
+            vec![("solo.md", "---\ntags: [other]\n---\n# x\n")],
+            "meeting",
+            0,
+            None,
+        ),
+        (
+            "a .txt decoy with the same tag is ignored",
+            vec![
+                ("note.md", "---\ntags: [meeting]\n---\n# md\n"),
+                ("note.txt", "tags: [meeting]"),
+            ],
+            "meeting",
+            1,
+            Some("note.md"),
+        ),
+        (
+            "POSITIVE: .markdown files are scanned too",
+            vec![("doc.markdown", "---\ntags: [test-tag]\n---\n# Doc\n")],
+            "test-tag",
+            1,
+            Some("doc.markdown"),
+        ),
+    ];
+    for (label, files, tag, expected_len, expected_suffix) in cases {
+        let dir = tempdir().unwrap();
+        for (name, body) in &files {
+            fs::write(dir.path().join(name), body).unwrap();
+        }
 
-#[test]
-fn test_list_files_by_tag_ignores_non_markdown_files() {
-    // A .txt with the same tag in its body must not be matched —
-    // only .md / .markdown files are scanned.
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("note.md"),
-        "---\ntags: [meeting]\n---\n# md\n",
-    )
-    .unwrap();
-    fs::write(dir.path().join("note.txt"), "tags: [meeting]").unwrap();
-    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "meeting").unwrap();
-    assert_eq!(res.len(), 1);
-    assert!(res[0].ends_with("note.md"));
-    assert!(res[0].starts_with("Workspace"));
+        let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", tag).unwrap();
+        assert_eq!(res.len(), expected_len, "case '{label}': got: {res:?}");
+        if let Some(suffix) = expected_suffix {
+            // Use ends_with because Path::join uses the platform
+            // separator (backslash on Windows, forward slash elsewhere).
+            assert!(
+                res[0].ends_with(suffix),
+                "case '{label}': expected a path ending in {suffix}, got: {res:?}"
+            );
+            assert!(
+                res[0].starts_with("Workspace"),
+                "case '{label}': paths must be library-relative, got: {res:?}"
+            );
+        }
+    }
 }
 
 // =====================================================================
@@ -488,34 +538,6 @@ fn test_grep_default_max_results_constant_is_200() {
 }
 
 #[test]
-fn test_tool_window_note_offset_past_end() {
-    // BOUNDARY: offset past the end of the file returns empty content
-    // (was an error in the 1-indexed variant; the offset/limit model is
-    // forgiving so the LLM can walk forward without computing lengths).
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
-
-    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 999, 100)
-        .unwrap()
-        .content;
-    assert_eq!(result, "");
-}
-
-#[test]
-fn test_tool_window_note_limit_zero() {
-    // BOUNDARY: limit=0 returns empty content without erroring.
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 0)
-        .unwrap()
-        .content;
-    assert_eq!(result, "");
-}
-
-#[test]
 fn test_tool_window_note_limit_beyond_file() {
     // BOUNDARY: limit that would overflow the file is clamped to the
     // remainder. Mirrors the pre-migration "end beyond file" behavior.
@@ -529,27 +551,6 @@ fn test_tool_window_note_limit_beyond_file() {
     assert!(content.contains("Line 1"));
     assert!(content.contains("Line 2"));
     assert!(content.contains("Line 3"));
-}
-
-#[test]
-fn test_tool_create_note_rejects_markdown_extension() {
-    // NEGATIVE: Only .md extension is allowed, not .markdown
-    let dir = tempdir().unwrap();
-    let file_path = dir.path().join("new.markdown");
-
-    let producer = noop_producer();
-    let result = tool_create_note(
-        &test_ctx(),
-        file_path.to_str().unwrap(),
-        "# Hello",
-        &*producer,
-    );
-    // Should reject .markdown extension
-    assert_eq!(
-        result.unwrap_err(),
-        "Only markdown files (.md) are allowed."
-    );
-    assert!(!file_path.exists());
 }
 
 #[test]
@@ -567,68 +568,50 @@ fn test_tool_list_notes_excludes_subdirectories() {
     assert!(!result.iter().any(|p| p.contains("nested.md")));
 }
 
+/// A successful `tool_move_note` removes the source, creates the target (and
+/// any missing parent directories) and preserves the body byte-for-byte.
 #[test]
-fn test_tool_list_notes_by_tag_with_markdown_extension() {
-    // POSITIVE: files with .markdown extension should also be found
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("doc.markdown"),
-        "---\ntags: [test-tag]\n---\n# Doc\n",
-    )
-    .unwrap();
+fn test_tool_move_note_relocates_the_file_and_preserves_its_content() {
+    let cases: Vec<(&str, &str, &[&str])> = vec![
+        (
+            "plain move within the same directory",
+            "# Note Content\nSome body text.",
+            &["target.md"],
+        ),
+        (
+            "missing parent directories are created",
+            "# Nested move test",
+            &["nested", "sub", "target.md"],
+        ),
+    ];
+    for (label, content, target_parts) in cases {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("source.md");
+        let mut target_path = dir.path().to_path_buf();
+        for part in target_parts {
+            target_path = target_path.join(part);
+        }
+        fs::write(&source_path, content).unwrap();
 
-    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "test-tag").unwrap();
-    assert_eq!(res.len(), 1);
-    assert!(res[0].ends_with("doc.markdown"));
-}
+        let producer = noop_producer();
+        let result = tool_move_note(
+            &test_ctx(),
+            source_path.to_str().unwrap(),
+            target_path.to_str().unwrap(),
+            &*producer,
+        )
+        .unwrap()
+        .result;
 
-#[test]
-fn test_tool_move_note_success() {
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("target.md");
-    fs::write(&source_path, "# Note Content\nSome body text.").unwrap();
-
-    let producer = noop_producer();
-    let result = tool_move_note(
-        &test_ctx(),
-        source_path.to_str().unwrap(),
-        target_path.to_str().unwrap(),
-        &*producer,
-    )
-    .unwrap()
-    .result;
-
-    assert_eq!(result, "File moved successfully.");
-    assert!(!source_path.exists());
-    assert!(target_path.exists());
-
-    let content = fs::read_to_string(&target_path).unwrap();
-    assert_eq!(content, "# Note Content\nSome body text.");
-}
-
-#[test]
-fn test_tool_move_note_creates_parent_directories() {
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("nested").join("sub").join("target.md");
-    fs::write(&source_path, "# Nested move test").unwrap();
-
-    let producer = noop_producer();
-    let result = tool_move_note(
-        &test_ctx(),
-        source_path.to_str().unwrap(),
-        target_path.to_str().unwrap(),
-        &*producer,
-    )
-    .unwrap()
-    .result;
-
-    assert_eq!(result, "File moved successfully.");
-    assert!(!source_path.exists());
-    assert!(target_path.exists());
-    let content = fs::read_to_string(&target_path).unwrap();
-    assert_eq!(content, "# Nested move test");
+        assert_eq!(result, "File moved successfully.", "case '{label}'");
+        assert!(!source_path.exists(), "case '{label}': source must be gone");
+        assert!(target_path.exists(), "case '{label}': target must exist");
+        assert_eq!(
+            fs::read_to_string(&target_path).unwrap(),
+            content,
+            "case '{label}': moved content"
+        );
+    }
 }
 
 #[test]
@@ -685,42 +668,28 @@ fn test_tool_move_note_rejects_invalid_extensions() {
     fs::write(&markdown_path, "content").unwrap();
 
     let producer = noop_producer();
-
-    // Source is .txt
-    let res1 = tool_move_note(
-        &test_ctx(),
-        txt_path.to_str().unwrap(),
-        dir.path().join("dest.md").to_str().unwrap(),
-        &*producer,
-    );
-    assert_eq!(res1.unwrap_err(), "Only markdown files (.md) are allowed.");
-
-    // Target is .txt
-    let res2 = tool_move_note(
-        &test_ctx(),
-        md_path.to_str().unwrap(),
-        dir.path().join("dest.txt").to_str().unwrap(),
-        &*producer,
-    );
-    assert_eq!(res2.unwrap_err(), "Only markdown files (.md) are allowed.");
-
-    // Source is .markdown
-    let res3 = tool_move_note(
-        &test_ctx(),
-        markdown_path.to_str().unwrap(),
-        dir.path().join("dest.md").to_str().unwrap(),
-        &*producer,
-    );
-    assert_eq!(res3.unwrap_err(), "Only markdown files (.md) are allowed.");
-
-    // Target is .markdown
-    let res4 = tool_move_note(
-        &test_ctx(),
-        md_path.to_str().unwrap(),
-        dir.path().join("dest.markdown").to_str().unwrap(),
-        &*producer,
-    );
-    assert_eq!(res4.unwrap_err(), "Only markdown files (.md) are allowed.");
+    let dest_md = dir.path().join("dest.md");
+    let dest_txt = dir.path().join("dest.txt");
+    let dest_markdown = dir.path().join("dest.markdown");
+    let cases: Vec<(&str, std::path::PathBuf, std::path::PathBuf)> = vec![
+        ("source is .txt", txt_path, dest_md.clone()),
+        ("target is .txt", md_path.clone(), dest_txt),
+        ("source is .markdown", markdown_path, dest_md),
+        ("target is .markdown", md_path, dest_markdown),
+    ];
+    for (label, source, target) in cases {
+        let result = tool_move_note(
+            &test_ctx(),
+            source.to_str().unwrap(),
+            target.to_str().unwrap(),
+            &*producer,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "Only markdown files (.md) are allowed.",
+            "case '{label}'"
+        );
+    }
 }
 
 #[test]
@@ -915,40 +884,46 @@ fn test_tool_move_note_accepts_uppercase_md_extension() {
     assert!(mock.file_exists(&target_path));
 }
 
+/// Every accepted field-name spelling of `MoveNoteInput` must round-trip into
+/// the same `source` / `target` pair: the primary names plus the serde aliases
+/// `from` / `source_path` -> `source` and `to` / `destination` / `target_path`
+/// -> `target`.
 #[test]
-fn test_tool_move_note_input_deserializes_primary_fields() {
-    // Confirm `source` / `target` primary field names round-trip.
-    let json = r#"{"source": "Lib/a.md", "target": "Lib/b.md"}"#;
-    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
-    assert_eq!(input.source, "Lib/a.md");
-    assert_eq!(input.target, "Lib/b.md");
-}
-
-#[test]
-fn test_tool_move_note_input_alias_from_to() {
-    // Serde aliases: `from` → `source`, `to` → `target`.
-    let json = r#"{"from": "Lib/old.md", "to": "Lib/new.md"}"#;
-    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
-    assert_eq!(input.source, "Lib/old.md");
-    assert_eq!(input.target, "Lib/new.md");
-}
-
-#[test]
-fn test_tool_move_note_input_alias_source_path_destination() {
-    // Serde aliases: `source_path` → `source`, `destination` → `target`.
-    let json = r#"{"source_path": "Lib/old.md", "destination": "Lib/new.md"}"#;
-    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
-    assert_eq!(input.source, "Lib/old.md");
-    assert_eq!(input.target, "Lib/new.md");
-}
-
-#[test]
-fn test_tool_move_note_input_alias_target_path() {
-    // Serde alias: `target_path` → `target`.
-    let json = r#"{"source": "Lib/old.md", "target_path": "Lib/new.md"}"#;
-    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
-    assert_eq!(input.source, "Lib/old.md");
-    assert_eq!(input.target, "Lib/new.md");
+fn test_tool_move_note_input_accepts_primary_fields_and_all_serde_aliases() {
+    let cases: Vec<(&str, &str, &str, &str)> = vec![
+        (
+            "primary `source` / `target`",
+            r#"{"source": "Lib/a.md", "target": "Lib/b.md"}"#,
+            "Lib/a.md",
+            "Lib/b.md",
+        ),
+        (
+            "alias `from` / `to`",
+            r#"{"from": "Lib/old.md", "to": "Lib/new.md"}"#,
+            "Lib/old.md",
+            "Lib/new.md",
+        ),
+        (
+            "alias `source_path` / `destination`",
+            r#"{"source_path": "Lib/old.md", "destination": "Lib/new.md"}"#,
+            "Lib/old.md",
+            "Lib/new.md",
+        ),
+        (
+            "alias `target_path`",
+            r#"{"source": "Lib/old.md", "target_path": "Lib/new.md"}"#,
+            "Lib/old.md",
+            "Lib/new.md",
+        ),
+    ];
+    for (label, json, expected_source, expected_target) in cases {
+        let input: crate::tools::dtos::MoveNoteInput =
+            serde_json::from_str(json).unwrap_or_else(|e| {
+                panic!("case '{label}': JSON must deserialize into MoveNoteInput: {e}")
+            });
+        assert_eq!(input.source, expected_source, "case '{label}': source");
+        assert_eq!(input.target, expected_target, "case '{label}': target");
+    }
 }
 
 #[test]

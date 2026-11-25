@@ -4,6 +4,21 @@
 
 This contract documents the externally observable behavior of the About Dialog for harness tests and manual QA. It is implementation-agnostic except where egui widget contracts are the observable surface.
 
+> **Superseded (2026-10-31)** — the sections below describe the original **egui**
+> dialog and are kept as history. The shipped dialog is the iced implementation in
+> `src/app/ui_iced/about.rs` and `src/app/ui_iced/attributions.rs`. What differs
+> for QA:
+>
+> | Clause | Shipped behaviour |
+> |---|---|
+> | §3 `egui::Window`, resizable, default 620×580, min 480×400 | A centred modal card filling 80 % of the viewport on both axes (viewport gutter clamps last); not user-resizable |
+> | §3 close via title-bar `X` | `Close` in the card footer, or `Escape` (topmost overlay) |
+> | §5 hover tooltip reveals the full hash | **No tooltip** — iced 0.14 has none and `iced_aw` is not a dependency. Clicking the commit cell copies the full 40-char hash |
+> | §7 attributions capped ~240 px in the same card | Same shape: inline in the card, scrollable, height solved from the card's remaining bands (the interim iced sub-dialog was removed) |
+> | App name "FastMD Viewer" | "FastMD AI" |
+> | §7 attribution count | 61 rows — the catalog grew after this contract was written; `attributions_tests` pins `DIRECT_DEPENDENCIES.len()` |
+> | §10 auto-show examples use `0.2.0` | illustrative only; the `fastmd` package is at `0.3.0`, and `should_auto_show_about` is version-parameterised |
+
 ## 1. Hamburger Menu Entry
 
 - **Location**: Top toolbar → hamburger menu button (`HAMBURGER_MENU_BUTTON` = Phosphor `LIST`) → `egui::containers::menu_button` with `id_salt HAMBURGER_MENU_ID_SALT`.
@@ -44,7 +59,7 @@ assert_bus_contains(&app, UserCommand::OpenAboutDialog)
 
 | Element | Content | Style |
 |---------|---------|-------|
-| App name | `strings::ABOUT_APP_NAME = "FastMD Viewer"` | `RichText::new(...).strong().heading()` or `ui.heading` |
+| App name | `strings::ABOUT_APP_NAME = "FastMD AI"` | `RichText::new(...).strong().heading()` or `ui.heading` |
 | Copyright | `strings::ABOUT_COPYRIGHT = "Copyright (c) 2026 Martin Kuhne"` | plain small text |
 | Branch row | `strings::ABOUT_BRANCH_LABEL` + `BUILD_BRANCH` | horizontal `Label` |
 | Commit row | `strings::ABOUT_COMMIT_LABEL` + short hash label (see §5) | clickable label with tooltip |
@@ -75,13 +90,13 @@ assert_bus_contains(&app, UserCommand::OpenAboutDialog)
 
 - **Header**: `strings::ABOUT_ATTRIBUTIONS_HEADER = "Third-Party Attributions"`.
 - **Scroll area**: `egui::ScrollArea::vertical().id_salt("about_attributions_scroll").max_height(240.0)`.
-- **Rows**: For each `attr in DIRECT_DEPENDENCIES` (58 entries, sorted by `name`):
+- **Rows**: For each `attr in DIRECT_DEPENDENCIES` (61 entries, sorted by `name`):
   - Crate name: `ui.strong(attr.name)` or `RichText::strong`.
   - Authors: `ui.label(attr.authors)` (fallback `ABOUT_UNKNOWN_AUTHOR` if needed, though dataset has no unknowns).
   - Link: `ui.hyperlink_to(attr.github_url, attr.github_url)` or `ui.hyperlink_to(attr.name, attr.github_url)` — whichever is chosen must consistently open the GitHub URL in external browser via `open_url`/`webbrowser`. Must have `on_hover_text` showing URL.
   - Row id: `ui.push_id((attr.name, "attribution_row"), |ui| { ... })` for stable IDs.
 - **Invariants** (covered by `attributions_tests.rs`):
-  - `DIRECT_DEPENDENCIES.len() == 58`
+  - `DIRECT_DEPENDENCIES.len() == 61`
   - Every `name`, `authors`, `github_url` non-empty
   - `github_url.starts_with("https://github.com/")`
   - Sorted ascending by `name` and no duplicates
@@ -100,7 +115,7 @@ All literals in §1–§7 must be sourced from `strings.rs` — no inline string
 ```
 MENU_ABOUT = "About FastMD..."
 ABOUT_DIALOG_TITLE = "About FastMD"
-ABOUT_APP_NAME = "FastMD Viewer"
+ABOUT_APP_NAME = "FastMD AI"
 ABOUT_COPYRIGHT = "Copyright (c) 2026 Martin Kuhne"
 ABOUT_BRANCH_LABEL = "Branch:"
 ABOUT_COMMIT_LABEL = "Commit:"

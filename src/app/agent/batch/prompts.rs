@@ -1,11 +1,17 @@
-//! Prompt discovery — walks content libraries to find prompt files (markdown tagged with `tags: [prompt]`) for the batch dialog.
+//! Prompt discovery - walks content libraries to find prompt files (markdown tagged with `tags: [prompt]`) for the batch dialog.
+//!
+//! Unit tests live in the sibling `prompts_tests.rs` sidecar.
 
 use super::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
 use crate::markdown::Document;
 use serde_norway::Value;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
+
+const PROMPT_DISCOVERY_ERROR_CODE: &str = "BATCH-4001";
+const PROMPT_DISCOVERY_FAILURE_MESSAGE: &str = "Prompt discovery failed";
 use walkdir::WalkDir;
 
 /// Discovers all prompt files in content libraries.
@@ -19,7 +25,14 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             continue;
         }
 
-        for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(root) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    log_prompt_discovery_error(root, error);
+                    continue;
+                }
+            };
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -33,15 +46,15 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
+                    log_prompt_discovery_error(path, e);
                     continue;
                 }
             };
 
             // `Document` pairs the front-matter and body in one
             // value, so the prompt tag check and the body
-            // extraction no longer re-split the content via
-            // `parse_front_matter` separately.
+            // extraction read them from the same parse instead of
+            // calling `parse_front_matter` separately.
             let doc = Document::new(content);
             let Some(fm) = doc.front_matter() else {
                 continue;
@@ -80,32 +93,49 @@ pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
         if !batch_dir.exists() || !batch_dir.is_dir() {
             continue;
         }
-        if let Ok(entries) = std::fs::read_dir(&batch_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    let file_name = path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    if file_name.starts_with('.') {
+        let entries = match std::fs::read_dir(&batch_dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log_prompt_discovery_error(&batch_dir, error);
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    log_prompt_discovery_error(&batch_dir, error);
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if path.is_file() {
+                let file_name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if file_name.starts_with('.') {
+                    continue;
+                }
+                let content = match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(error) => {
+                        log_prompt_discovery_error(&path, error);
                         continue;
                     }
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let doc = Document::new(content);
-                        let stem = path
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| file_name.clone());
-                        let display_name = format!("{} / Skills/Batch/{}", lib.name, stem);
-                        skills.push(PromptInfo {
-                            path: path.clone(),
-                            display_name,
-                            library_name: lib.name.clone(),
-                            content: doc.body().trim().to_string(),
-                        });
-                    }
-                }
+                };
+                let doc = Document::new(content);
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file_name.clone());
+                let display_name = format!("{} / Skills/Batch/{}", lib.name, stem);
+                skills.push(PromptInfo {
+                    path: path.clone(),
+                    display_name,
+                    library_name: lib.name.clone(),
+                    content: doc.body().trim().to_string(),
+                });
             }
         }
     }
@@ -115,6 +145,17 @@ pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
             .then_with(|| a.path.cmp(&b.path))
     });
     skills
+}
+
+/// Emits the coded error shared by failures while scanning prompt libraries.
+fn log_prompt_discovery_error(path: &Path, error: impl Display) {
+    tracing::error!(
+        target: "batch",
+        error_code = PROMPT_DISCOVERY_ERROR_CODE,
+        path = %path.display(),
+        error = %error,
+        message = PROMPT_DISCOVERY_FAILURE_MESSAGE
+    );
 }
 
 /// Resolve a set of prompt paths into full `PromptInfo` objects.
@@ -135,7 +176,7 @@ pub fn resolve_prompts(
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
+                    log_prompt_discovery_error(path, e);
                     return None;
                 }
             };
@@ -204,124 +245,5 @@ pub fn read_prompt_content(path: &Path) -> Result<String, std::io::Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_read_prompt_content_with_front_matter() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test-prompt.md");
-        fs::write(
-            &path,
-            "---\ntitle: My Prompt\ntags: [prompt]\n---\nThis is the prompt body.",
-        )
-        .unwrap();
-
-        let content = read_prompt_content(&path).unwrap();
-        assert_eq!(content, "This is the prompt body.");
-    }
-
-    #[test]
-    fn test_read_prompt_content_no_front_matter() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("simple.md");
-        fs::write(&path, "Just plain content without front matter.").unwrap();
-
-        let content = read_prompt_content(&path).unwrap();
-        assert_eq!(content, "Just plain content without front matter.");
-    }
-
-    #[test]
-    fn test_read_prompt_content_empty_body() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("empty.md");
-        fs::write(&path, "---\ntitle: Empty\n---\n   ").unwrap();
-
-        let content = read_prompt_content(&path).unwrap();
-        assert_eq!(content, "");
-    }
-
-    #[test]
-    fn test_read_prompt_content_nonexistent_file() {
-        let result = read_prompt_content(Path::new("/nonexistent/file.md"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_discover_batch_skills() {
-        let dir = tempfile::tempdir().unwrap();
-        let sys_dir = dir.path().join("system");
-        let batch_dir = sys_dir.join("Skills").join("Batch");
-        fs::create_dir_all(&batch_dir).unwrap();
-
-        fs::write(
-            batch_dir.join("SummarizeAll.md"),
-            "---\ntitle: Summarize\n---\nSummarize this file.",
-        )
-        .unwrap();
-        fs::write(
-            batch_dir.join("ExtractEntities.txt"),
-            "Extract entities from this file.",
-        )
-        .unwrap();
-        fs::write(batch_dir.join(".hidden.md"), "Ignore me").unwrap();
-
-        let libs = vec![ContentLibrary {
-            root_folder: sys_dir.to_string_lossy().to_string(),
-            name: "System".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        }];
-
-        let skills = discover_batch_skills(&libs);
-        assert_eq!(skills.len(), 2);
-        assert_eq!(
-            skills[0].display_name,
-            "System / Skills/Batch/ExtractEntities"
-        );
-        assert_eq!(skills[0].content, "Extract entities from this file.");
-        assert_eq!(skills[1].display_name, "System / Skills/Batch/SummarizeAll");
-        assert_eq!(skills[1].content, "Summarize this file.");
-
-        let config = AppConfig {
-            content_libraries: libs.clone(),
-            ..Default::default()
-        };
-        let discovered = discover_prompts(&config);
-        assert_eq!(discovered.len(), 2);
-
-        let resolved = resolve_prompts(&BTreeSet::new(), &libs);
-        assert_eq!(resolved.len(), 2);
-    }
-
-    #[test]
-    fn test_discover_batch_skills_deterministic_sorting() {
-        let dir = tempfile::tempdir().unwrap();
-        let sys_dir = dir.path().join("system");
-        let batch_dir = sys_dir.join("Skills").join("Batch");
-        fs::create_dir_all(&batch_dir).unwrap();
-
-        fs::write(batch_dir.join("Z_Skill.md"), "Z content").unwrap();
-        fs::write(batch_dir.join("A_Skill.md"), "A content").unwrap();
-        fs::write(batch_dir.join("M_Skill.md"), "M content").unwrap();
-
-        let libs = vec![ContentLibrary {
-            root_folder: sys_dir.to_string_lossy().to_string(),
-            name: "System".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        }];
-
-        let skills = discover_batch_skills(&libs);
-        assert_eq!(skills.len(), 3);
-        assert_eq!(skills[0].display_name, "System / Skills/Batch/A_Skill");
-        assert_eq!(skills[0].content, "A content");
-        assert_eq!(skills[1].display_name, "System / Skills/Batch/M_Skill");
-        assert_eq!(skills[1].content, "M content");
-        assert_eq!(skills[2].display_name, "System / Skills/Batch/Z_Skill");
-        assert_eq!(skills[2].content, "Z content");
-    }
-}
+#[path = "prompts_tests.rs"]
+mod tests;

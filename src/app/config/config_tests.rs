@@ -276,18 +276,12 @@ fn test_debug_impls() {
     assert!(s2.contains("AppConfig"));
 }
 
-/// Regression: previously the three `test_load_config_*` tests mutated
-/// the process-wide `APPDATA` env var, and `load_config()` read it
-/// back. Under the parallel test runner, another test could overwrite
-/// `APPDATA` between the `set_var` and the `load_config` call, so
-/// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see another test's value instead of
-/// the expected `None`.
-///
-/// The refactor that moved the file I/O behind a path parameter
-/// removed the shared state; this test pins that property by loading
-/// N independent config files from N threads simultaneously and
-/// asserting every thread sees its own data.
+/// Regression: `load_config_from_path` takes the path as an argument
+/// and never reads the process-wide `APPDATA` env var, so tests cannot
+/// interfere with one another through shared environment state. This
+/// test pins that isolation by loading N independent config files
+/// from N threads simultaneously and asserting every thread sees its
+/// own data.
 #[test]
 fn test_load_config_from_path_is_isolated() {
     use std::sync::{Arc, Barrier};
@@ -424,16 +418,16 @@ fn deficit_strategy_default_is_hybrid() {
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
     // Round-trip: to_config and from_config compose back to the same
     // variant, so a persisted config with the default value
     // deserialises to the same strategy.
-    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    let s = crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
     assert_eq!(s, "hybrid");
     assert_eq!(
-        crate::ui::table_width::DeficitStrategy::from_config(s),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::from_config(s),
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -529,7 +523,7 @@ fn deficit_strategy_respects_config_value() {
     };
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        crate::markdown::table_width::DeficitStrategy::ProportionalToSlack
     );
 }
 
@@ -538,7 +532,7 @@ fn deficit_strategy_parses_survey_algorithm_strings() {
     // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
     // must parse from its canonical config string. This guards the
     // round-trip with the top-bar combobox.
-    use crate::ui::table_width::DeficitStrategy;
+    use crate::markdown::table_width::DeficitStrategy;
     for (raw, expected) in [
         ("ratio", DeficitStrategy::WaterFillRatio),
         ("lagrange", DeficitStrategy::LagrangePenalty),
@@ -1387,14 +1381,43 @@ fn test_file_config_storage_saves_to_path() {
     let storage = FileConfigStorage::new(path.clone());
     assert_eq!(storage.path(), path.as_path());
 
-    let mut cfg = AppConfig::default();
-    cfg.table_width_strategy = "waterfill".to_string();
+    let cfg = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     let written = storage.save_config(&cfg).unwrap();
     assert_eq!(written, path);
     assert!(path.exists());
 
-    let loaded = crate::config::load_config_from_path(&path, None);
+    // [RUST-006]: the second argument pins the system-library root. Passing
+    // `None` makes the loader fall back to `%APPDATA%/fastmd/system` and
+    // create folders and sample skill files there, so the temp root must be
+    // passed explicitly (same idiom as `test_load_config_creates_default_when_missing`).
+    let sys_path = tmp.path().join("system");
+    let sys_root = sys_path.to_string_lossy().to_string();
+    let loaded = crate::config::load_config_from_path(&path, Some(&sys_path));
     assert_eq!(loaded.table_width_strategy, "waterfill");
+    assert!(
+        sys_path.join("Conversations").is_dir(),
+        "the injected system path must be the root the loader materialises"
+    );
+    assert!(
+        sys_path
+            .join("Skills")
+            .join("Note")
+            .join("FormatMarkdown.md")
+            .exists(),
+        "the sample skill must be seeded under the temp root, never the user profile"
+    );
+    let system_lib = loaded
+        .content_libraries
+        .iter()
+        .find(|lib| lib.name == "System")
+        .expect("the load must register the System library");
+    assert_eq!(
+        system_lib.root_folder, sys_root,
+        "the System library must be rooted in the temp dir, never %APPDATA%"
+    );
 }
 
 #[test]
@@ -1411,12 +1434,16 @@ fn test_in_memory_config_storage_records_history() {
     assert!(storage.saved_configs().is_empty());
     assert!(storage.latest_config().is_none());
 
-    let mut cfg1 = AppConfig::default();
-    cfg1.table_width_strategy = "waterfill".to_string();
+    let cfg1 = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg1).unwrap();
 
-    let mut cfg2 = AppConfig::default();
-    cfg2.table_width_strategy = "lagrange".to_string();
+    let cfg2 = AppConfig {
+        table_width_strategy: "lagrange".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg2).unwrap();
 
     let history = storage.saved_configs();
@@ -1426,5 +1453,1421 @@ fn test_in_memory_config_storage_records_history() {
     assert_eq!(
         storage.latest_config().unwrap().table_width_strategy,
         "lagrange"
+    );
+}
+
+// ---- models_for_use_case_min_cost ----
+
+fn chat_model(model: &str, cost: Option<i32>) -> LlmConfig {
+    LlmConfig {
+        model: model.to_string(),
+        api_url: "http://localhost".to_string(),
+        api_key: "k".to_string(),
+        cost,
+        use_case: vec!["chat".to_string()],
+    }
+}
+
+/// Every model tied at the lowest cost is returned, so the UI can offer the
+/// whole tie instead of picking one arbitrarily.
+#[test]
+fn test_models_for_use_case_min_cost_returns_every_tied_model() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap-a".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("cheap-b".to_string(), chat_model("b", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("c", Some(7)));
+
+    let mut keys: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    keys.sort_unstable();
+
+    assert_eq!(
+        keys,
+        vec!["cheap-a", "cheap-b"],
+        "only the models tied at the minimum cost may be returned"
+    );
+}
+
+/// `cost` is documented to default to `0` ([CONFIG-006], [CONFIG-008]), so an
+/// unpriced model is free: it ranks ahead of every priced model and ties with a
+/// declared `cost: 0`, and `models_for_use_case_min_cost` returns it together
+/// with any explicitly free model.
+#[test]
+fn app_config_ranks_an_unpriced_model_as_free() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("b", Some(9)));
+    config
+        .models
+        .insert("unpriced".to_string(), chat_model("c", None));
+
+    let mut keys: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    keys.sort_unstable();
+
+    assert_eq!(
+        keys,
+        vec!["unpriced"],
+        "an absent price defaults to 0, so it is the minimum-cost match"
+    );
+
+    // A declared 0 and an absent price are the same price, so both are returned.
+    config
+        .models
+        .insert("free".to_string(), chat_model("d", Some(0)));
+    let mut tied: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    tied.sort_unstable();
+    assert_eq!(
+        tied,
+        vec!["free", "unpriced"],
+        "a declared 0 and an absent price must tie at the minimum"
+    );
+
+    // A config without any `cost:` entries keeps selecting every model.
+    let mut unpriced_only = AppConfig::default();
+    unpriced_only
+        .models
+        .insert("one".to_string(), chat_model("a", None));
+    unpriced_only
+        .models
+        .insert("two".to_string(), chat_model("b", None));
+    let mut all_unknown: Vec<&str> = unpriced_only
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    all_unknown.sort_unstable();
+    assert_eq!(
+        all_unknown,
+        vec!["one", "two"],
+        "when nothing is priced, everything is tied at 0 and still selectable"
+    );
+}
+
+#[test]
+fn test_models_for_use_case_min_cost_single_winner() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("b", Some(9)));
+
+    let matches = config.models_for_use_case_min_cost("chat");
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].0, "cheap");
+    assert_eq!(matches[0].1.model, "a");
+}
+
+/// A use case nothing is configured for yields an empty list rather than a
+/// fallback to an unrelated model.
+#[test]
+fn test_models_for_use_case_min_cost_empty_when_nothing_matches() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "vision_only".to_string(),
+        LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(1),
+            use_case: vec!["vision".to_string()],
+        },
+    );
+
+    assert!(config.models_for_use_case_min_cost("chat").is_empty());
+    assert!(
+        AppConfig::default()
+            .models_for_use_case_min_cost("chat")
+            .is_empty()
+    );
+}
+
+// ---- get_or_create_system_library_at ----
+
+/// The path-taking variant must create the system folders and label the
+/// library with the configured display name — without touching the platform
+/// default locations ([RUST-024]).
+#[test]
+fn test_get_or_create_system_library_at_creates_folders_and_labels_library() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system-root");
+    let config = AppConfig {
+        system_library_name: Some("My Library".to_string()),
+        ..AppConfig::default()
+    };
+
+    let library = config.get_or_create_system_library_at(&sys_path);
+
+    assert_eq!(
+        library.root_folder,
+        sys_path.to_string_lossy().to_string(),
+        "the library must be rooted at the requested path, not a platform default"
+    );
+    assert_eq!(library.name, "My Library");
+    assert_eq!(library.kind, "text");
+    assert!(!library.readonly);
+    assert_eq!(library.priority, 0);
+    assert!(
+        sys_path.join("Skills").join("Note").exists(),
+        "the system folders must be created as a side effect"
+    );
+}
+
+#[test]
+fn test_get_or_create_system_library_at_falls_back_to_default_display_name() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system-root");
+    let config = AppConfig::default();
+
+    let library = config.get_or_create_system_library_at(&sys_path);
+
+    assert_eq!(library.name, "System");
+}
+
+// ---- list_skill_files_in ----
+
+/// `list_skill_files_in` must degrade to an empty list for anything that is not
+/// a readable directory, skip dotfiles, and sort case-insensitively by name.
+#[test]
+fn test_list_skill_files_in_edge_cases() {
+    let dir = tempdir().unwrap();
+    let skills = dir.path().join("skills");
+    std::fs::create_dir_all(&skills).unwrap();
+    std::fs::write(skills.join("beta.md"), "b").unwrap();
+    std::fs::write(skills.join("Alpha.md"), "a").unwrap();
+    std::fs::write(skills.join(".hidden.md"), "h").unwrap();
+    std::fs::write(skills.join("no_extension"), "n").unwrap();
+    std::fs::create_dir(skills.join("nested")).unwrap();
+    std::fs::create_dir(dir.path().join("empty")).unwrap();
+    let a_file = dir.path().join("a-file.md");
+    std::fs::write(&a_file, "not a dir").unwrap();
+
+    struct Case {
+        name: &'static str,
+        dir: PathBuf,
+        expected: Vec<&'static str>,
+    }
+    let cases = [
+        Case {
+            name: "missing directory",
+            dir: dir.path().join("does-not-exist"),
+            expected: vec![],
+        },
+        Case {
+            name: "path is a file, not a directory",
+            dir: a_file.clone(),
+            expected: vec![],
+        },
+        Case {
+            name: "empty directory",
+            dir: dir.path().join("empty"),
+            expected: vec![],
+        },
+        Case {
+            name: "dotfiles and subdirectories are skipped and names sort case-insensitively",
+            dir: skills.clone(),
+            expected: vec!["Alpha", "beta", "no_extension"],
+        },
+    ];
+
+    for case in cases {
+        let found = AppConfig::list_skill_files_in(&case.dir);
+        let names: Vec<&str> = found.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, case.expected, "case: {}", case.name);
+    }
+
+    // The stem of a Markdown file is the display name; the full path is kept.
+    let found = AppConfig::list_skill_files_in(&skills);
+    assert_eq!(
+        found[0].path,
+        skills.join("Alpha.md"),
+        "the skill must carry the path it was discovered at"
+    );
+    assert_eq!(
+        found[2].name, "no_extension",
+        "a file without an extension falls back to its file name"
+    );
+}
+
+// ---- save_config_to_path ----
+
+/// A missing parent chain is created, and the written YAML reloads identically.
+#[test]
+fn test_save_config_to_path_creates_parents_and_round_trips() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("deep").join("nested").join("config.yaml");
+    let config = AppConfig {
+        system_prompt_extension: Some("be terse".to_string()),
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
+
+    let written = save_config_to_path(&config, &path).unwrap();
+
+    assert_eq!(written, path);
+    assert!(path.exists());
+    let reloaded = load_config_from_path(&path, Some(&dir.path().join("system")));
+    assert_eq!(
+        reloaded.system_prompt_extension.as_deref(),
+        Some("be terse")
+    );
+    assert_eq!(reloaded.table_width_strategy, "waterfill");
+}
+
+/// When the parent cannot be created the error must name the directory that
+/// failed instead of surfacing a bare write error.
+#[test]
+fn test_save_config_to_path_reports_an_uncreatable_parent() {
+    let dir = tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "i am a file").unwrap();
+    let path = blocker.join("config.yaml");
+
+    let err = save_config_to_path(&AppConfig::default(), &path)
+        .expect_err("a parent blocked by a regular file cannot be created");
+
+    assert!(
+        err.contains("failed to create config parent dir"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !path.exists(),
+        "no config file may be written under an uncreatable parent"
+    );
+}
+
+// ---- load_config_from_path fallbacks ----
+
+/// A path that exists but cannot be read (here: a directory) must fall back to
+/// the default config with the system library projected in, and must not
+/// overwrite the offending path.
+#[test]
+fn test_load_config_from_path_falls_back_when_the_file_is_unreadable() {
+    let dir = tempdir().unwrap();
+    let system_path = dir.path().join("system");
+    let config_path = dir.path().join("config.yaml");
+    std::fs::create_dir(&config_path).unwrap();
+
+    let config = load_config_from_path(&config_path, Some(&system_path));
+
+    assert_eq!(
+        config.system_prompt_extension,
+        AppConfig::default().system_prompt_extension
+    );
+    assert!(
+        config_path.is_dir(),
+        "the fallback must not replace the unreadable path with a file"
+    );
+    assert!(
+        config
+            .content_libraries
+            .iter()
+            .any(|lib| lib.name == "System"),
+        "the system library must still be projected onto the fallback config"
+    );
+}
+
+/// An unparseable file must also leave the file untouched — the fallback path
+/// does not rewrite it, so the user's broken YAML stays visible for repair.
+#[test]
+fn test_load_config_from_path_does_not_rewrite_an_unparseable_file() {
+    let dir = tempdir().unwrap();
+    let system_path = dir.path().join("system");
+    let config_path = dir.path().join("config.yaml");
+    std::fs::write(&config_path, "invalid: yaml: [").unwrap();
+
+    let config = load_config_from_path(&config_path, Some(&system_path));
+
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        "invalid: yaml: [",
+        "a broken config file must not be silently overwritten"
+    );
+    assert_eq!(config.table_width_strategy, "hybrid");
+}
+
+// ---- validate ----
+
+/// Several independent problems must all be reported in one pass so the user
+/// can fix the file in a single edit.
+#[test]
+fn test_validate_collects_multiple_warnings() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "odd".to_string(),
+        LlmConfig {
+            model: "m".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["summarise".to_string(), "embeddings".to_string()],
+        },
+    );
+    config.models.insert(
+        "also-odd".to_string(),
+        LlmConfig {
+            model: "m2".to_string(),
+            api_url: "http://b".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["chat-ish".to_string()],
+        },
+    );
+
+    let warnings = config.validate();
+
+    assert_eq!(
+        warnings.len(),
+        3,
+        "two unknown use_cases plus the missing chat model: {warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("odd") && w.contains("summarise"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("also-odd") && w.contains("chat-ish"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w == "No model configured with 'chat' use_case")
+    );
+}
+
+// ---- DiscordConfig serde defaults ----
+
+/// A bare `discord:` block must fill in the documented defaults rather than
+/// failing to deserialise.
+#[test]
+fn test_discord_config_serde_defaults() {
+    let parsed: DiscordConfig = serde_norway::from_str("{}").unwrap();
+
+    assert!(parsed.bot_token.is_none());
+    assert!(parsed.allowed_channels.is_empty());
+    assert!(parsed.allowed_guilds.is_empty());
+    assert!(
+        parsed.register_commands,
+        "slash-command registration is on by default"
+    );
+    assert!(parsed.system_prompt.is_none());
+    assert_eq!(parsed.max_history, 20);
+    assert_eq!(parsed.rate_limit_per_minute, 10);
+    assert!(parsed.blocked_patterns.is_empty());
+
+    // Explicit values must win over the defaults.
+    let parsed: DiscordConfig = serde_norway::from_str(
+        "register_commands: false\nmax_history: 3\nrate_limit_per_minute: 1\nblocked_patterns: [\"secret\"]\n",
+    )
+    .unwrap();
+    assert!(!parsed.register_commands);
+    assert_eq!(parsed.max_history, 3);
+    assert_eq!(parsed.rate_limit_per_minute, 1);
+    assert_eq!(parsed.blocked_patterns, vec!["secret".to_string()]);
+}
+
+// ---- DiscordConfig secret redaction (NFR-009) ----
+
+/// A Discord configuration with every field populated, so a redaction test can
+/// tell "the secret is hidden" apart from "the whole struct prints nothing".
+fn discord_config_with_token(token: &str) -> DiscordConfig {
+    DiscordConfig {
+        bot_token: Some(token.to_string()),
+        allowed_channels: vec!["channel-123".to_string()],
+        allowed_guilds: vec!["guild-456".to_string()],
+        register_commands: true,
+        system_prompt: Some("Answer briefly.".to_string()),
+        max_history: 7,
+        rate_limit_per_minute: 3,
+        blocked_patterns: vec!["internal-only".to_string()],
+    }
+}
+
+/// **Regression test for the Discord bot token leaking through `Debug` (defect D2).**
+///
+/// `DiscordConfig` used to derive `Debug`, so `{:?}` printed `bot_token:
+/// Some("<the real token>")` — and because `AppConfig`'s `Debug` forwards to it,
+/// any `tracing::debug!("{config:?}")` wrote the credential to the log, which
+/// [NFR-009] forbids. The token is now rendered as the repo-wide `[REDACTED]`
+/// placeholder while every other field stays readable.
+#[test]
+fn discord_config_debug_redacts_the_bot_token() {
+    const SECRET: &str = "MTA5NDIyOTc0MzY3OTAwMDcwNg.GbRaZx.supersecrettokenvalue";
+    let config = discord_config_with_token(SECRET);
+
+    let rendered = format!("{config:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "Debug must never print the bot token, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("supersecret"),
+        "no fragment of the token may survive, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("[REDACTED]"),
+        "the token must be replaced by the repo-wide redaction placeholder, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Some(\"[REDACTED]\")"),
+        "a configured token must still be visible as *configured*, got: {rendered}"
+    );
+
+    // Every non-secret field must remain readable, otherwise redaction has
+    // quietly turned the diagnostic into a black box.
+    for expected in [
+        "channel-123",
+        "guild-456",
+        "register_commands: true",
+        "Answer briefly.",
+        "max_history: 7",
+        "rate_limit_per_minute: 3",
+        "internal-only",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "Debug must keep `{expected}` readable, got: {rendered}"
+        );
+    }
+    assert!(
+        rendered.starts_with("DiscordConfig"),
+        "the struct name must still head the dump, got: {rendered}"
+    );
+}
+
+/// An unconfigured token must not be dressed up as a redacted one: `None` stays
+/// Regression test for defect 02 (fixed).
+/// `None` so an operator can tell "no token" from "token set".
+#[test]
+fn discord_config_debug_keeps_an_absent_token_as_none() {
+    let rendered = format!("{:?}", DiscordConfig::default());
+
+    assert!(
+        rendered.contains("bot_token: None"),
+        "an absent token must print as None, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("[REDACTED]"),
+        "nothing is redacted when nothing was configured, got: {rendered}"
+    );
+}
+
+/// An empty configured token is still a configured value: its *presence* is
+/// Regression test for defect 02 (fixed).
+/// reported, its content is not.
+#[test]
+fn discord_config_debug_redacts_an_empty_token_too() {
+    let rendered = format!("{:?}", discord_config_with_token(""));
+
+    assert!(
+        rendered.contains("Some(\"[REDACTED]\")"),
+        "an empty token must be reported as configured-but-redacted, got: {rendered}"
+    );
+}
+
+/// The leak that actually mattered: `AppConfig` is what gets logged, and its
+/// Regression test for defect 02 (fixed).
+/// `Debug` forwards to the Discord config.
+#[test]
+fn app_config_debug_does_not_leak_the_discord_token() {
+    const SECRET: &str = "Bot.s3cr3t-t0k3n-value-do-not-log";
+    let config = AppConfig {
+        discord: Some(discord_config_with_token(SECRET)),
+        ..AppConfig::default()
+    };
+
+    let rendered = format!("{config:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "AppConfig's Debug must not carry the Discord token, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("discord: Some(") && rendered.contains("[REDACTED]"),
+        "the Discord section must still be present and redacted, got: {rendered}"
+    );
+}
+
+/// `AppConfig`'s hand-written `Debug` must name every field an operator needs
+/// when triaging a bad config — a missing `.field(...)` silently hides a field
+/// from diagnostics.
+#[test]
+fn test_app_config_debug_lists_every_field() {
+    let config = AppConfig {
+        discord: Some(DiscordConfig {
+            bot_token: Some("token".to_string()),
+            ..DiscordConfig::default()
+        }),
+        qdrant_url: Some("http://qdrant:6333".to_string()),
+        qdrant_collection: Some("notes".to_string()),
+        csv_db_path: Some("C:/db".to_string()),
+        pdf_converter_command: Some(vec!["pandoc".to_string(), "{input}".to_string()]),
+        ..AppConfig::default()
+    };
+
+    let rendered = format!("{config:?}");
+
+    for field in [
+        "system_prompt_extension",
+        "models",
+        "selected_chat_model",
+        "searxng_url",
+        "jmap_clients",
+        "caldav_clients",
+        "content_libraries",
+        "system_library_name",
+        "pdf_converter_command",
+        "inline_editor_enabled",
+        "csv_db_path",
+        "feature_flags",
+        "max_tokens",
+        "tool_groups",
+        "mcp_servers",
+        "table_width_strategy",
+        "trello_client",
+        "discord",
+        "qdrant_url",
+        "qdrant_api_key",
+        "qdrant_collection",
+    ] {
+        assert!(
+            rendered.contains(field),
+            "Debug must list the `{field}` field, got: {rendered}"
+        );
+    }
+    assert!(rendered.starts_with("AppConfig"));
+}
+// ---------------------------------------------------------------------------
+// Stale `selected_chat_model` — the selection can point at a model that was
+// removed from `models` between sessions, so every fallback hop has to hold.
+// ---------------------------------------------------------------------------
+
+/// Build a model that is deliberately *not* usable for chat.
+fn non_chat_model(model: &str, cost: Option<i32>) -> LlmConfig {
+    LlmConfig {
+        model: model.to_string(),
+        api_url: "http://localhost".to_string(),
+        api_key: "k".to_string(),
+        cost,
+        use_case: vec!["vision".to_string()],
+    }
+}
+
+/// A selection naming a model that no longer exists must be ignored in favour
+/// of the cheapest model carrying the `chat` use case.
+#[test]
+fn test_select_chat_model_ignores_a_selection_that_names_a_removed_model() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "vision-only".to_string(),
+        non_chat_model("vision-a", Some(1)),
+    );
+    config
+        .models
+        .insert("chat-key".to_string(), chat_model("chat-a", Some(50)));
+    config.selected_chat_model = Some("deleted-model".to_string());
+
+    let picked = config
+        .select_chat_model()
+        .expect("a chat model is configured, so a stale selection must not fail");
+
+    assert_eq!(
+        picked.model, "chat-a",
+        "a stale selection must fall through to the `chat` use-case model, not fail or pick the cheaper vision model"
+    );
+}
+
+/// With no `chat` model left, the last resort is *any* configured model.
+#[test]
+fn test_select_chat_model_uses_any_model_when_a_stale_selection_leaves_no_chat_model() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "vision-only".to_string(),
+        non_chat_model("vision-a", Some(3)),
+    );
+    config.selected_chat_model = Some("deleted-model".to_string());
+
+    let picked = config
+        .select_chat_model()
+        .expect("one configured model is enough to satisfy the request");
+
+    assert_eq!(
+        picked.model, "vision-a",
+        "without a `chat` model the first available model must be served instead of erroring"
+    );
+}
+
+/// A stale selection with an empty model map is still a hard configuration error.
+#[test]
+fn test_select_chat_model_reports_no_models_for_a_stale_selection() {
+    let config = AppConfig {
+        selected_chat_model: Some("deleted-model".to_string()),
+        ..Default::default()
+    };
+
+    let err = config
+        .select_chat_model()
+        .expect_err("no configured models can never select a model");
+
+    assert_eq!(
+        err, "No LLM models are configured.",
+        "the stale-selection path must report the same error as the unselected path"
+    );
+}
+
+/// The API-key guard applies to whichever model the fallback chain lands on,
+/// not only to the explicitly selected one.
+#[test]
+fn test_select_chat_model_still_validates_the_api_key_of_a_fallback_model() {
+    let mut config = AppConfig::default();
+    let mut unusable = chat_model("chat-a", Some(1));
+    unusable.api_key = String::new();
+    config.models.insert("chat-key".to_string(), unusable);
+    config.selected_chat_model = Some("deleted-model".to_string());
+
+    let err = config
+        .select_chat_model()
+        .expect_err("an empty API key must be rejected after the fallback");
+
+    assert_eq!(
+        err, "API key not set or invalid.",
+        "the fallback model must pass the same API-key guard as a selected one"
+    );
+}
+
+/// `current_chat_model_key` mirrors the selection rules: valid explicit choice
+/// first, then cheapest `chat` model, then any key, then nothing.
+#[test]
+fn test_current_chat_model_key_resolves_explicit_and_fallback_selections() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "vision-only".to_string(),
+        non_chat_model("vision-a", Some(1)),
+    );
+    config
+        .models
+        .insert("chat-key".to_string(), chat_model("chat-a", Some(50)));
+
+    assert_eq!(
+        config.current_chat_model_key().as_deref(),
+        Some("chat-key"),
+        "the cheapest `chat` model wins even when a cheaper non-chat model exists"
+    );
+
+    config.selected_chat_model = Some("vision-only".to_string());
+    assert_eq!(
+        config.current_chat_model_key().as_deref(),
+        Some("vision-only"),
+        "an explicit selection of a valid non-chat model must be honoured over cost ranking"
+    );
+
+    config.selected_chat_model = Some("removed".to_string());
+    assert_eq!(
+        config.current_chat_model_key().as_deref(),
+        Some("chat-key"),
+        "a selection naming a removed model must fall back to the `chat` model"
+    );
+
+    config.models.remove("chat-key");
+    assert_eq!(
+        config.current_chat_model_key().as_deref(),
+        Some("vision-only"),
+        "without any `chat` model the first configured key is the fallback"
+    );
+
+    config.models.clear();
+    assert_eq!(
+        config.current_chat_model_key(),
+        None,
+        "an empty model map has no key to report"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// System-library path helpers (VFS-103, VFS-120..123)
+// ---------------------------------------------------------------------------
+
+/// The Skills paths are defined as children of the system library path, so
+/// they must stay nested no matter which environment branch resolved it.
+#[test]
+fn test_skills_path_helpers_nest_under_the_system_library() {
+    let library = AppConfig::get_system_library_path();
+    let skills = AppConfig::get_skills_dir();
+
+    assert_eq!(
+        skills,
+        library.join("Skills"),
+        "the Skills directory must be a direct child of the system library"
+    );
+    assert_eq!(
+        AppConfig::get_skills_note_dir(),
+        skills.join("Note"),
+        "VFS-121: Note skills live in Skills/Note"
+    );
+    assert_eq!(
+        AppConfig::get_skills_folder_dir(),
+        skills.join("Folder"),
+        "VFS-122: Folder skills live in Skills/Folder"
+    );
+    assert_eq!(
+        AppConfig::get_skills_batch_dir(),
+        skills.join("Batch"),
+        "VFS-123: Batch skills live in Skills/Batch"
+    );
+}
+
+/// The default config location is the user's `%APPDATA%/fastmd/config.yaml`
+/// unless an operator override is active for this process.
+#[test]
+fn test_get_config_path_falls_back_to_the_user_config_location() {
+    let has_override = std::env::var("FASTMD_CONFIG_PATH")
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+    if has_override {
+        // An operator override wins by design; the fallback branch cannot be
+        // observed without mutating process-global state (RUST-006).
+        return;
+    }
+
+    let path = get_config_path();
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        assert_eq!(
+            path,
+            PathBuf::from(app_data).join("fastmd").join("config.yaml"),
+            "CONFIG-001: the default config file must live at %APPDATA%/fastmd/config.yaml"
+        );
+    } else if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        assert_eq!(
+            path,
+            PathBuf::from(user_profile).join(".fastmd.yaml"),
+            "without APPDATA the config file must live at $USERPROFILE/.fastmd.yaml"
+        );
+    } else {
+        assert_eq!(
+            path,
+            PathBuf::from(".fastmd.yaml"),
+            "without any user directory the config file must stay relative"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Serde defaults for a partial / empty document
+// ---------------------------------------------------------------------------
+
+/// An empty YAML document must still produce a fully populated configuration.
+#[test]
+fn test_empty_yaml_document_uses_the_serialised_defaults() {
+    let config: AppConfig = serde_norway::from_str("{}")
+        .expect("an empty document must deserialize via serde defaults");
+
+    assert_eq!(
+        config.max_tokens, 32768,
+        "AGENT-010: max_tokens defaults to 32768"
+    );
+    assert_eq!(
+        config.table_width_strategy, "hybrid",
+        "the table deficit strategy defaults to the hybrid solver"
+    );
+    assert!(
+        !config.inline_editor_enabled,
+        "CONFIG-001: the inline editor stays off until enabled"
+    );
+    assert_eq!(
+        config.feature_flags.get("toolCallDebugMode"),
+        Some(&false),
+        "privacy default: tool-call debug logging is off"
+    );
+    assert!(
+        config.models.is_empty(),
+        "no models are implied by an empty document"
+    );
+    assert!(
+        config.selected_chat_model.is_none(),
+        "the runtime selection is never persisted"
+    );
+}
+
+/// The documented SearXNG endpoint survives deserialisation: a config file that
+/// omits `searxng_url` keeps the web-search integration enabled, exactly like a
+/// freshly constructed `AppConfig` (`SETUP.md` documents the default).
+///
+/// Was: the field carried a bare `#[serde(default)]`, which resolved to
+/// `Option::default()` (`None`) and silently disabled the integration for every
+/// file that omitted the key.
+#[test]
+fn searxng_url_default_survives_deserialisation_when_the_key_is_absent() {
+    assert_eq!(
+        AppConfig::default().searxng_url.as_deref(),
+        Some("http://localhost:8090"),
+        "a freshly built AppConfig ships with a local SearXNG endpoint"
+    );
+
+    let from_file: AppConfig =
+        serde_norway::from_str("max_tokens: 1024").expect("a one-key document must parse");
+
+    assert_eq!(
+        from_file.max_tokens, 1024,
+        "the supplied key must still be applied"
+    );
+    assert_eq!(
+        from_file.searxng_url.as_deref(),
+        Some("http://localhost:8090"),
+        "a file without `searxng_url` keeps the documented default"
+    );
+}
+
+/// The opt-out stays available: the key being *present* with a null value is an
+/// explicit "no search engine", not a missing key.
+#[test]
+fn searxng_url_explicit_null_disables_the_integration() {
+    let from_file: AppConfig =
+        serde_norway::from_str("searxng_url:").expect("a null-valued key must parse");
+
+    assert_eq!(
+        from_file.searxng_url, None,
+        "an explicit `searxng_url: null` must disable the integration"
+    );
+}
+
+/// The hand-written `Debug` impl renders a credential as `[REDACTED]` rather
+/// than omitting the field, so an operator can see that a key is configured
+/// without the value ever reaching a log line ([NFR-009]).
+///
+/// Was: `qdrant_api_key` was left out of the field list entirely, which is safe
+/// but invisible in diagnostics — unlike every other credential in this module.
+#[test]
+fn app_config_debug_redacts_the_qdrant_api_key() {
+    const SECRET: &str = "qdrant-super-secret";
+    let config = AppConfig {
+        qdrant_api_key: Some(SECRET.to_string()),
+        qdrant_url: Some("http://localhost:6334".to_string()),
+        ..Default::default()
+    };
+
+    let rendered = format!("{config:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "Debug must not print the Qdrant API key, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("qdrant_url"),
+        "the non-secret Qdrant URL must stay visible in diagnostics, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("qdrant_api_key: Some(\"[REDACTED]\")"),
+        "a configured key must be reported as configured-but-redacted, got: {rendered}"
+    );
+}
+
+/// An unconfigured Qdrant key must not be dressed up as a redacted one: `None`
+/// stays `None` so "no key" is distinguishable from "key set".
+#[test]
+fn app_config_debug_keeps_an_absent_qdrant_api_key_as_none() {
+    let rendered = format!("{:?}", AppConfig::default());
+
+    assert!(
+        rendered.contains("qdrant_api_key: None"),
+        "an absent key must print as None, got: {rendered}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Full-document serde coverage
+// ---------------------------------------------------------------------------
+
+/// A configuration file that names **every** persisted key, with non-default
+/// values, so no `#[serde(default = ...)]` arm can silently swallow something
+/// the user actually wrote (CONFIG-001, AGENT-009/010, CONFIG-012, VFS-102).
+const FULL_CONFIG_YAML: &str = r#"
+system_prompt_extension: "be terse"
+models:
+  fast:
+    model: "vendor/fast-1"
+    api_url: "http://localhost:4000/v1"
+    api_key: "sk-fast"
+    cost: 5
+    use_case: ["chat", "vision"]
+searxng_url: "http://search.local:8090"
+jmap_clients:
+  primary:
+    url: "https://jmap.example.com"
+    token: "jmap-token"
+caldav_clients:
+  work:
+    url: "https://caldav.example.com"
+    username: "user"
+    password: "pw"
+content_libraries:
+  - root_folder: "D:/notes"
+    name: "Notes"
+    kind: "text"
+    readonly: false
+    priority: 3
+pdf_converter_command: ["typst", "compile", "-f", "pdf"]
+inline_editor_enabled: true
+csv_db_path: "D:/dbs"
+feature_flags:
+  toolCallDebugMode: true
+  experimentalThing: false
+max_tokens: 4096
+tool_groups:
+  filesystem: false
+  browser: true
+  trello: false
+mcp_servers:
+  local:
+    enabled: false
+    transport: stdio
+    command: "mcp-local"
+    args: ["--verbose"]
+    env:
+      LEVEL: "debug"
+  remote:
+    enabled: true
+    transport: sse
+    url: "http://localhost:9000/sse"
+table_width_strategy: "lagrange"
+browser:
+  screenshot_dir: "D:/shots"
+  headless: false
+  browser_type: "chromium"
+  idle_timeout_seconds: 60
+  page_load_timeout_ms: 15000
+  storage_state_path: "D:/state.json"
+trello_client:
+  token: "trello-token"
+  api_key: "trello-key"
+discord:
+  bot_token: "discord-token"
+  allowed_channels: ["chan-1"]
+  allowed_guilds: ["guild-1"]
+  register_commands: false
+  system_prompt: "be helpful"
+  max_history: 5
+  rate_limit_per_minute: 3
+  blocked_patterns: ["secret"]
+qdrant_url: "http://localhost:6334"
+qdrant_api_key: "qdrant-key"
+qdrant_collection: "custom_chunks"
+system_library_name: "Vault"
+"#;
+
+/// Every key of [`FULL_CONFIG_YAML`] must land in the matching field, and the
+/// keys the document omits inside a nested struct must still use that struct's
+/// own serde defaults (`tool_groups.web` stays enabled below).
+#[test]
+fn test_full_yaml_document_populates_every_persisted_field() {
+    let config: AppConfig =
+        serde_norway::from_str(FULL_CONFIG_YAML).expect("the full document must parse");
+
+    assert_eq!(
+        config.system_prompt_extension.as_deref(),
+        Some("be terse"),
+        "system_prompt_extension must be read verbatim"
+    );
+
+    let model = config
+        .models
+        .get("fast")
+        .expect("the model must be stored under its map key");
+    assert_eq!(model.model, "vendor/fast-1");
+    assert_eq!(model.api_url, "http://localhost:4000/v1");
+    assert_eq!(model.api_key, "sk-fast");
+    assert_eq!(
+        model.cost,
+        Some(5),
+        "an explicit price must survive parsing"
+    );
+    assert_eq!(
+        model.use_case,
+        vec!["chat".to_string(), "vision".to_string()]
+    );
+    assert!(
+        model.has_vision(),
+        "the use_case list must drive the helpers"
+    );
+
+    assert_eq!(
+        config.selected_chat_model, None,
+        "the runtime chat selection is `#[serde(skip)]` and can never be loaded"
+    );
+    assert_eq!(
+        config.searxng_url.as_deref(),
+        Some("http://search.local:8090")
+    );
+
+    let jmap = config
+        .jmap_clients
+        .get("primary")
+        .expect("the JMAP client must be stored under its map key");
+    assert_eq!(jmap.url, "https://jmap.example.com");
+    assert_eq!(jmap.token, "jmap-token");
+
+    let caldav = config
+        .caldav_clients
+        .get("work")
+        .expect("the CalDAV client must be stored under its map key");
+    assert_eq!(caldav.url, "https://caldav.example.com");
+    assert_eq!(caldav.username, "user");
+    assert_eq!(caldav.password, "pw");
+
+    assert_eq!(config.content_libraries.len(), 1);
+    assert_eq!(config.content_libraries[0].root_folder, "D:/notes");
+    assert_eq!(config.content_libraries[0].name, "Notes");
+    assert_eq!(config.content_libraries[0].kind, "text");
+    assert!(
+        !config.content_libraries[0].readonly,
+        "an explicit `readonly: false` must override the `default_readonly()` of true"
+    );
+    assert_eq!(config.content_libraries[0].priority, 3);
+
+    assert_eq!(
+        config.pdf_converter_command.as_deref(),
+        Some(
+            [
+                "typst".to_string(),
+                "compile".to_string(),
+                "-f".to_string(),
+                "pdf".to_string()
+            ]
+            .as_slice()
+        ),
+        "AGENT-009: the PDF converter template is a list of arguments"
+    );
+    assert!(config.inline_editor_enabled, "CONFIG-001");
+    assert_eq!(config.csv_db_path.as_deref(), Some("D:/dbs"));
+    assert_eq!(config.feature_flags.get("toolCallDebugMode"), Some(&true));
+    assert_eq!(config.feature_flags.get("experimentalThing"), Some(&false));
+    assert_eq!(config.max_tokens, 4096, "AGENT-010");
+
+    assert!(!config.tool_groups.filesystem);
+    assert!(config.tool_groups.browser);
+    assert!(
+        !config.tool_groups.trello,
+        "an explicitly disabled tool group must not fall back to `default_true()`"
+    );
+    assert!(
+        config.tool_groups.web,
+        "a partially specified `tool_groups` map must fill the omitted groups from their own defaults"
+    );
+
+    assert_eq!(config.mcp_servers.len(), 2, "CONFIG-012");
+    let local = config.mcp_servers.get("local").expect("local server entry");
+    assert!(
+        !local.is_enabled(),
+        "an MCP entry carries its own enabled flag"
+    );
+    match local.config() {
+        McpServerConfig::Stdio { command, args, env } => {
+            assert_eq!(command, "mcp-local");
+            assert_eq!(args, &["--verbose".to_string()]);
+            assert_eq!(env.get("LEVEL").map(String::as_str), Some("debug"));
+        }
+        other => panic!("expected a Stdio entry, got {other:?}"),
+    }
+    let remote = config
+        .mcp_servers
+        .get("remote")
+        .expect("remote server entry");
+    assert!(remote.is_enabled());
+    match remote.config() {
+        McpServerConfig::Sse { url, .. } => assert_eq!(url, "http://localhost:9000/sse"),
+        other => panic!("expected an Sse entry, got {other:?}"),
+    }
+
+    assert_eq!(config.table_width_strategy, "lagrange");
+    assert_eq!(
+        config.deficit_strategy(),
+        crate::markdown::table_width::DeficitStrategy::LagrangePenalty,
+        "the parsed strategy must resolve through the same mapping the UI uses"
+    );
+
+    assert_eq!(config.browser.screenshot_dir, "D:/shots");
+    assert!(!config.browser.headless);
+    assert_eq!(config.browser.browser_type, "chromium");
+    assert_eq!(config.browser.idle_timeout_seconds, 60);
+    assert_eq!(config.browser.page_load_timeout_ms, 15000);
+    assert_eq!(config.browser.storage_state_path, "D:/state.json");
+
+    let trello = config.trello_client.as_ref().expect("trello client");
+    assert_eq!(trello.token, "trello-token");
+    assert_eq!(trello.api_key, "trello-key");
+
+    let discord = config.discord.as_ref().expect("discord config");
+    assert_eq!(discord.bot_token.as_deref(), Some("discord-token"));
+    assert_eq!(discord.allowed_channels, vec!["chan-1".to_string()]);
+    assert_eq!(discord.allowed_guilds, vec!["guild-1".to_string()]);
+    assert!(!discord.register_commands);
+    assert_eq!(discord.system_prompt.as_deref(), Some("be helpful"));
+    assert_eq!(discord.max_history, 5);
+    assert_eq!(discord.rate_limit_per_minute, 3);
+    assert_eq!(discord.blocked_patterns, vec!["secret".to_string()]);
+
+    assert_eq!(config.qdrant_url.as_deref(), Some("http://localhost:6334"));
+    assert_eq!(config.qdrant_api_key.as_deref(), Some("qdrant-key"));
+    assert_eq!(config.qdrant_collection.as_deref(), Some("custom_chunks"));
+    assert_eq!(config.system_library_name.as_deref(), Some("Vault"));
+    assert_eq!(
+        config.system_library_display_name(),
+        "Vault",
+        "VFS-102: the configured name replaces the default label"
+    );
+}
+
+/// Whatever the loader can read, the writer must be able to write back: a
+/// serialise/parse cycle must preserve every persisted field (CONFIG-001).
+#[test]
+fn test_full_config_round_trips_through_serialised_yaml() {
+    let config: AppConfig =
+        serde_norway::from_str(FULL_CONFIG_YAML).expect("the full document must parse");
+
+    let yaml = serde_norway::to_string(&config).expect("a loaded config must serialise");
+    let again: AppConfig = serde_norway::from_str(&yaml).expect("the written YAML must re-parse");
+
+    assert_eq!(
+        again.system_prompt_extension, config.system_prompt_extension,
+        "system_prompt_extension must round-trip"
+    );
+    assert_eq!(again.models, config.models, "every model must round-trip");
+    assert_eq!(again.searxng_url, config.searxng_url);
+    assert_eq!(
+        again.content_libraries.len(),
+        config.content_libraries.len(),
+        "the library list must round-trip with the same number of entries"
+    );
+    for (before, after) in config
+        .content_libraries
+        .iter()
+        .zip(&again.content_libraries)
+    {
+        assert_eq!(
+            (
+                &after.root_folder,
+                &after.name,
+                &after.kind,
+                after.readonly,
+                after.priority
+            ),
+            (
+                &before.root_folder,
+                &before.name,
+                &before.kind,
+                before.readonly,
+                before.priority
+            ),
+            "library `{}` must round-trip unchanged",
+            before.name
+        );
+    }
+    assert_eq!(
+        again.pdf_converter_command, config.pdf_converter_command,
+        "AGENT-009"
+    );
+    assert_eq!(again.inline_editor_enabled, config.inline_editor_enabled);
+    assert_eq!(again.csv_db_path, config.csv_db_path);
+    assert_eq!(again.feature_flags, config.feature_flags);
+    assert_eq!(again.max_tokens, config.max_tokens, "AGENT-010");
+    assert_eq!(again.tool_groups, config.tool_groups, "CONFIG-012");
+    assert_eq!(again.mcp_servers, config.mcp_servers);
+    assert_eq!(again.table_width_strategy, config.table_width_strategy);
+    assert_eq!(again.browser, config.browser);
+    assert_eq!(again.discord, config.discord);
+    assert_eq!(again.qdrant_url, config.qdrant_url);
+    assert_eq!(again.qdrant_collection, config.qdrant_collection);
+    assert_eq!(again.system_library_name, config.system_library_name);
+
+    assert!(
+        yaml.contains("qdrant_api_key"),
+        "the Qdrant API key is persisted (it has no `#[serde(skip)]`), so it must appear in the file"
+    );
+    assert!(
+        !yaml.contains("selected_chat_model"),
+        "the runtime chat selection must never be written to disk"
+    );
+}
+
+/// A document that supplies `feature_flags` replaces the built-in map instead
+/// of merging into it, so any built-in flag the user did not repeat disappears.
+///
+/// KNOWN DRIFT (reported, not fixed): partial flag maps are not merged with
+/// Regression test for the defect pinned as `defect_feature_flags_in_a_document_replace_the_built_in_default_map` (fixed).
+/// `default_feature_flags()`.
+#[test]
+fn feature_flags_in_a_document_replace_the_built_in_default_map() {
+    let config: AppConfig = serde_norway::from_str("feature_flags:\n  onlyFlag: true\n")
+        .expect("a single-key flag map must parse");
+
+    assert_eq!(
+        config.feature_flags.len(),
+        1,
+        "the document value is used verbatim, not merged"
+    );
+    assert_eq!(config.feature_flags.get("onlyFlag"), Some(&true));
+    assert!(
+        !config.feature_flags.contains_key("toolCallDebugMode"),
+        "drift: the built-in `toolCallDebugMode` default is lost when the file names any flag"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Failure paths and derived helpers
+// ---------------------------------------------------------------------------
+
+/// The Skills tree cannot be created underneath a regular file, and the error
+/// must propagate instead of being swallowed (VFS-120).
+#[test]
+fn test_ensure_skills_dirs_at_reports_failure_when_the_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "i am a file").unwrap();
+
+    let result = AppConfig::ensure_skills_dirs_at(&blocker);
+
+    assert!(
+        result.is_err(),
+        "a Skills tree under a regular file must report an error, got {result:?}"
+    );
+    assert!(
+        !AppConfig::get_skills_note_dir_at(&blocker).exists(),
+        "no Skills/Note directory may be reported as available under a blocked root"
+    );
+}
+
+/// `SkillFile` is compared and cloned by the skill pickers, so the derived
+/// identity must cover both the display name and the path (VFS-121..123).
+#[test]
+fn test_skill_file_equality_covers_name_and_path() {
+    let skill = SkillFile {
+        name: "FormatMarkdown".to_string(),
+        path: PathBuf::from("skills/Note/FormatMarkdown.md"),
+    };
+
+    assert_eq!(
+        skill,
+        skill.clone(),
+        "a cloned skill must compare equal to its source"
+    );
+    assert_ne!(
+        skill,
+        SkillFile {
+            name: "Proofread".to_string(),
+            path: skill.path.clone(),
+        },
+        "two files in the same folder are different skills"
+    );
+    assert_ne!(
+        skill,
+        SkillFile {
+            name: skill.name.clone(),
+            path: PathBuf::from("elsewhere/FormatMarkdown.md"),
+        },
+        "the same display name in another folder is a different skill"
+    );
+
+    let rendered = format!("{skill:?}");
+    assert!(
+        rendered.contains("SkillFile") && rendered.contains("FormatMarkdown"),
+        "Debug must name the type and the skill for diagnostics, got: {rendered}"
+    );
+}
+
+/// When `canonicalize()` fails, the raw path is used for matching, so an
+/// existing library entry pointing at that raw path is repaired in place
+/// instead of being duplicated (VFS-100..105).
+#[test]
+fn test_ensure_system_library_present_at_matches_the_raw_path_when_canonicalising_fails() {
+    let dir = tempdir().unwrap();
+    let blocker = dir.path().join("blocked");
+    std::fs::write(&blocker, "i am a file").unwrap();
+    let system_path = blocker.join("system");
+    assert!(
+        system_path.canonicalize().is_err(),
+        "precondition: a path under a regular file cannot be canonicalised"
+    );
+
+    let mut config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: system_path.to_string_lossy().to_string(),
+            name: "Stale".to_string(),
+            kind: "image".to_string(),
+            readonly: true,
+            priority: 7,
+        }],
+        system_library_name: Some("Vault".to_string()),
+        ..AppConfig::default()
+    };
+
+    config.ensure_system_library_present_at(&system_path);
+
+    assert_eq!(
+        config.content_libraries.len(),
+        1,
+        "the raw path must match the existing entry instead of inserting a duplicate"
+    );
+    let library = &config.content_libraries[0];
+    assert_eq!(library.name, "Vault", "the configured display name wins");
+    assert_eq!(library.root_folder, system_path.to_string_lossy());
+    assert_eq!(library.kind, "text");
+    assert!(!library.readonly, "the system library is always writable");
+    assert_eq!(library.priority, 0);
+}
+
+/// An empty `APPDATA` counts as *unset*, so the `USERPROFILE` fallback is
+/// reached instead of resolving under an empty root. Shares the
+/// `logs.rs::non_empty` rule with the log-directory resolution (VFS-103).
+///
+/// Was: `APPDATA=` was treated as a configured root and yielded the relative
+/// `fastmd/system` instead of falling through to `USERPROFILE/.fastmd/system`.
+#[test]
+fn system_library_path_treats_an_empty_appdata_as_unset() {
+    let path = AppConfig::system_library_path_from_env(Some(""), Some("C:\\Users\\tester"));
+
+    assert_eq!(
+        path,
+        PathBuf::from("C:\\Users\\tester")
+            .join(".fastmd")
+            .join("system"),
+        "an empty APPDATA must fall through to USERPROFILE/.fastmd/system"
+    );
+}
+
+/// An empty `USERPROFILE` is unset as well, so two empty variables behave
+/// exactly like two missing ones and never contribute an empty leading
+/// path component.
+#[test]
+fn system_library_path_treats_an_empty_userprofile_as_unset_too() {
+    assert_eq!(
+        AppConfig::system_library_path_from_env(Some(""), Some("")),
+        PathBuf::from("system"),
+        "empty APPDATA and USERPROFILE behave like both being unset"
     );
 }

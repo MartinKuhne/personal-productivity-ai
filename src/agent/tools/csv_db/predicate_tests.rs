@@ -14,16 +14,16 @@ fn test_tautology_and_contradiction() {
     let ctx = HashMap::new();
 
     let p1 = Predicate::parse("1 == 1").unwrap();
-    assert_eq!(p1.eval_boolean(&ctx).unwrap(), true);
+    assert!(p1.eval_boolean(&ctx).unwrap());
 
     let p2 = Predicate::parse("true").unwrap();
-    assert_eq!(p2.eval_boolean(&ctx).unwrap(), true);
+    assert!(p2.eval_boolean(&ctx).unwrap());
 
     let p3 = Predicate::parse("1 == 0").unwrap();
-    assert_eq!(p3.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p3.eval_boolean(&ctx).unwrap());
 
     let p4 = Predicate::parse("false").unwrap();
-    assert_eq!(p4.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p4.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -31,22 +31,22 @@ fn test_numeric_comparisons() {
     let ctx = make_ctx(vec![("price", Value::Float(1.5)), ("qty", Value::Int(10))]);
 
     let p = Predicate::parse("price < 2.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("price > 2.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty >= 10").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty <= 9").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty != 5").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty == 10").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -57,19 +57,19 @@ fn test_mixed_int_and_float_comparisons() {
     ]);
 
     let p = Predicate::parse("int_val == float_val").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("int_val == 5.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("float_val == 5").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("int_val < 5.5").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("float_val > 4").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -77,16 +77,16 @@ fn test_string_comparisons() {
     let ctx = make_ctx(vec![("item", Value::String("apple".to_string()))]);
 
     let p = Predicate::parse("item == \"apple\"").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item == 'apple'").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item != \"banana\"").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item == \"banana\"").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -98,22 +98,22 @@ fn test_logical_and_or_not() {
     ]);
 
     let p = Predicate::parse("item == \"apple\" && price < 2.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item == \"apple\" and price > 2.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item == \"banana\" || qty == 10").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("item == \"banana\" or qty == 5").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("!(item == \"banana\")").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("not (price > 5.0)").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -126,11 +126,11 @@ fn test_parenthesized_grouping() {
 
     // true || (false && false) -> true
     let p = Predicate::parse("a || (b && c)").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     // (true || false) && false -> false
     let p = Predicate::parse("(a || b) && c").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), false);
+    assert!(!p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]
@@ -183,16 +183,16 @@ fn test_arithmetic_in_predicate() {
     let ctx = make_ctx(vec![("qty", Value::Int(10)), ("price", Value::Float(2.5))]);
 
     let p = Predicate::parse("qty + 5 == 15").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty * price == 25.0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("qty / 2 == 5").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 
     let p = Predicate::parse("-5 < 0").unwrap();
-    assert_eq!(p.eval_boolean(&ctx).unwrap(), true);
+    assert!(p.eval_boolean(&ctx).unwrap());
 }
 
 #[test]

@@ -1,10 +1,12 @@
 //! Agent seam events and bus observer — the event payloads that flow over `Bus<AgentEvent>`.
+//!
+//! Unit tests live in the sibling `agent_tests.rs` sidecar.
 
 use crate::agent::events::{AgentEventObserver, AgentStatus, ToolSideEffect};
 use crate::agent::tools::observer::OnFileChanged;
 use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::file::{FileChanged, FileEventProducer};
 use crate::bus::events::messages::TokenUsageInfo;
 use serde::Serialize;
 use serde_json::Value;
@@ -96,7 +98,7 @@ impl AgentEvent {
 
 /// An observer that serializes observer calls back into `AgentEvent` variants
 /// and forwards them to a `Bus<AgentEvent>`, and publishes file mutations
-/// to a `Bus<FileEvent>`.
+/// to a `Bus<FileChanged>`.
 pub struct BusAgentEventObserver {
     session_id: Uuid,
     bus: Bus<AgentEvent>,
@@ -114,7 +116,11 @@ impl BusAgentEventObserver {
     }
 
     /// Create a new observer scoped to `session_id` that also publishes file changes to `file_bus`.
-    pub fn with_file_bus(session_id: Uuid, bus: Bus<AgentEvent>, file_bus: Bus<FileEvent>) -> Self {
+    pub fn with_file_bus(
+        session_id: Uuid,
+        bus: Bus<AgentEvent>,
+        file_bus: Bus<FileChanged>,
+    ) -> Self {
         Self {
             session_id,
             bus,
@@ -305,57 +311,5 @@ impl AgentEventObserver for CompositeAgentEventObserver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::bus::events::file::FileEventKind;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_bus_agent_event_observer_forwards_file_events() {
-        let session_id = Uuid::new_v4();
-        let agent_bus = Bus::new();
-        let agent_reader = agent_bus.subscribe();
-        let file_bus: Bus<FileEvent> = Bus::new();
-        let file_reader = file_bus.subscribe();
-
-        let observer = BusAgentEventObserver::with_file_bus(session_id, agent_bus, file_bus);
-
-        let test_path = PathBuf::from("notes/test.md");
-        observer.on_tool_side_effect(ToolSideEffect::FileChanged {
-            path: test_path.clone(),
-        });
-
-        let ev = file_reader
-            .try_recv()
-            .expect("file event must be published");
-        assert_eq!(ev.kind, FileEventKind::Updated);
-        assert_eq!(ev.paths, vec![test_path.clone()]);
-
-        let agent_ev = agent_reader
-            .try_recv()
-            .expect("agent event must be published");
-        match agent_ev {
-            AgentEvent::ToolSideEffect { effect, .. } => {
-                assert_eq!(effect, ToolSideEffect::FileChanged { path: test_path });
-            }
-            other => panic!("expected ToolSideEffect, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_composite_agent_event_observer_forwards_all_events() {
-        let obs1 = Arc::new(crate::agent::events::RecordingObserver::new());
-        let obs2 = Arc::new(crate::agent::events::RecordingObserver::new());
-
-        let composite = CompositeAgentEventObserver::new(vec![obs1.clone(), obs2.clone()]);
-        composite.on_session_started();
-        composite.on_thinking("reasoning".to_string());
-        composite.on_content_delta("delta".to_string());
-        composite.on_status(AgentStatus::Done);
-        composite.on_session_finished(vec![serde_json::json!({"role": "user", "content": "hi"})]);
-
-        assert_eq!(obs1.events().len(), 5);
-        assert_eq!(obs2.events().len(), 5);
-        assert_eq!(obs1.events(), obs2.events());
-    }
-}
+#[path = "agent_tests.rs"]
+mod tests;

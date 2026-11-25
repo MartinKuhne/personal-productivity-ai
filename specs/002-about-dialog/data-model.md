@@ -47,14 +47,14 @@
       pub authors: &'static str,     // author/maintainer display string
       pub github_url: &'static str,  // https://github.com/...
   }
-  pub const DIRECT_DEPENDENCIES: &[Attribution] = &[...58...];
+  pub const DIRECT_DEPENDENCIES: &[Attribution] = &[...61...];
   ```
 - **Validation rules** (from FR-010/FR-012 and tests):
   - `name`, `authors`, `github_url` non-empty
   - `github_url` starts with `https://github.com/`
   - Slice sorted alphabetically by `name` (`windows` < `walkdir` etc. — strictly increasing)
   - No duplicate `name` values
-  - Length == 58 and exactly matches direct third-party dependencies across workspace `Cargo.toml` members (excluding workspace members `fastmd`, `fastmd-agent`, `fastmd-pdf`, `fastmd-tool-macros`)
+  - Length == 61 and exactly matches direct third-party dependencies across workspace `Cargo.toml` members (excluding workspace members `fastmd`, `fastmd-agent`, `fastmd-pdf`, `fastmd-tool-macros`)
 - **Display**: Rendered under `ABOUT_ATTRIBUTIONS_HEADER` inside `ScrollArea::vertical().id_salt("about_attributions_scroll").max_height(240.0)`. Each row: `name` in strong font, `authors` plain, clickable `github_url` via `ui.hyperlink_to(...)` which opens in external browser. Row `id_salt` uses `(name, "attribution_row")` for stable `egui::Id`.
 - **Relationships**: Static catalog; no references to runtime state.
 
@@ -75,7 +75,7 @@
 Dialogs.about_dialog_open --controls visibility of--> AboutDialog
 AboutDialog --reads--> BuildMetadata (env! constants)
 AboutDialog --reads--> LicenseText (include_str!)
-AboutDialog --iterates--> Attribution[58] via DIRECT_DEPENDENCIES
+AboutDialog --iterates--> Attribution[61] via DIRECT_DEPENDENCIES
 AboutDialog --writes on X--> Dialogs.about_dialog_open = false
 UserCommand::OpenAboutDialog --sets--> Dialogs.about_dialog_open = true
 FastMdApp::new --reads--> PersistedUiState.about_shown_for_version

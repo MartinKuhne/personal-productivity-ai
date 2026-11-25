@@ -4,7 +4,7 @@ This document describes the architecture of the Markdown rendering pipeline, wit
 
 ## Table Rendering Pipeline
 
-The table layout pipeline is designed to be fully modular, decoupling pure layout math and text measurement from the `egui` UI context. This ensures that the layout logic is 100% testable without spinning up a UI framework, and the UI painter logic remains as simple as possible.
+The table layout pipeline is designed to be fully modular, decoupling pure layout math and text measurement from the UI rendering context. This ensures that the layout logic is 100% testable without spinning up a UI framework, and the UI painter logic remains as simple as possible.
 
 The pipeline follows a distinct 4-stage flow:
 
@@ -21,7 +21,7 @@ pub trait TextMeasurer {
 }
 ```
 
-By abstracting this operation behind a trait, we can inject a mock/dummy measurer for unit testing (e.g., assuming 1 char = 10 pixels), while the production environment injects an `egui`-backed measurer that calculates precise pixel widths using the loaded fonts.
+By abstracting this operation behind a trait, we can inject a mock/dummy measurer for unit testing (e.g., assuming 1 char = 10 pixels), while the production environment injects the iced-side measurer (`src/app/ui_iced/table_width.rs`) that supplies the widths the solver needs. Because iced only hands a text renderer to `Widget::layout` and `view()` has none, the production measurer takes its width function as an injected closure and ships a deterministic average-advance approximation as the default; a renderer-backed closure can be substituted with no change to this module.
 
 ### 3. Table Layout Builder
 The `TableLayoutBuilder` takes the `SemanticTable`, the injected `TextMeasurer`, and the available `max_width`.
@@ -48,5 +48,5 @@ pub struct LayoutCell {
 ```
 This structure contains the exact pre-calculated `x, y, width, height` boundaries for every cell, as well as row/column boundaries.
 
-### 5. UI Painter (`egui`)
-The final stage happens in the `ui` module. The `egui` painter consumes the `TableLayout`. Because all complex logic, wrapping calculations, and size constraints have already been resolved, the painter only needs to execute simple drawing commands: setting up the scroll area (if required), drawing background rectangles for cells, drawing borders, and rendering the text into the pre-defined bounding boxes.
+### 5. UI Painter (iced)
+The final stage happens in the iced render path (`src/app/ui_iced/render/table.rs`). The iced table consumes the resolved `TableLayout`. Because all complex logic, wrapping calculations, and size constraints have already been resolved, the painter only needs to pin each `table::Column` to the solved `Length::Fixed` width, wrap the grid in a scrollable when `needs_horizontal_scroll` is set, and render the cell contents into the pre-calculated boundaries.

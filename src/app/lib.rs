@@ -4,11 +4,13 @@ pub mod agent;
 pub mod background;
 pub mod bus;
 pub mod command_executor;
+pub mod error_codes;
 pub mod export;
 pub mod integrations;
 pub mod markdown;
 pub(crate) mod orchestrator;
 pub mod ui;
+pub mod ui_iced;
 pub mod utils;
 pub mod workspace;
 

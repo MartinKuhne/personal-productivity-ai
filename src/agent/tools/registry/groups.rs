@@ -55,7 +55,7 @@ pub enum ToolGroupKind {
 }
 
 /// Per-group state, rebuilt by
-/// [`ToolRegistry::refresh_state`](super::ToolRegistry::refresh_state).
+/// [`ToolRegistry::groups`](super::ToolRegistry::groups).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolGroupState {
     /// Stable identifier.
@@ -95,7 +95,7 @@ impl ToolGroupState {
     /// to the LLM `tools` array (per TOOL-015/016).
     ///
     /// `char_count_for_tool` is supplied by the caller because the
-    /// `ToolGroupState` is intentionally egui- and JSON-free.
+    /// `ToolGroupState` is intentionally UI-framework- and JSON-free.
     pub fn prompt_char_count(&self, char_count_for_tool: &dyn Fn(&str) -> Option<usize>) -> usize {
         self.tool_names
             .iter()

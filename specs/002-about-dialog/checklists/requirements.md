@@ -31,5 +31,5 @@
 
 ## Notes
 
-- All checklist items pass. Spec is derived from a detailed implementation plan that already resolved scope decisions: attribution scope (58 direct dependencies across all 4 workspace crates), commit hash display (short hash visible with full hash on hover tooltip + click-to-copy), and license source (root LICENSE file). No clarifications needed; defaults documented in Assumptions. Implementation details (build.rs env vars, UserCommand variant, Dialogs field, strings.rs constants, egui Window params) intentionally excluded from the spec and deferred to planning.
+- All checklist items pass. Spec is derived from a detailed implementation plan that already resolved scope decisions: attribution scope (61 direct dependencies across all 4 workspace crates), commit hash display (short hash visible with full hash on hover tooltip + click-to-copy), and license source (root LICENSE file). No clarifications needed; defaults documented in Assumptions. Implementation details (build.rs env vars, UserCommand variant, Dialogs field, strings.rs constants, egui Window params) intentionally excluded from the spec and deferred to planning.
 - Spec avoids naming Rust/egui internals while still covering the mandatory bus-routing requirement (FR-014) in technology-agnostic terms (unified user-command/event bus).

@@ -1,12 +1,11 @@
 //! Fair Table Width Algorithm (FTWA) - pure column-width solver.
 //!
-//! Pure layout math with no egui dependency and no Markdown types; consumes
-//! `&[f32]` measurements. Lives in `markdown::` per `src/desktop/AGENTS.md §5`
-//! (pure layout math belongs in `markdown/`, not `ui/`).
+//! Pure layout math with no UI-framework dependency and no Markdown types; consumes
+//! `&[f32]` measurements. Pure layout math belongs in `markdown/`, not `ui/`.
 //!
-//! The egui-bridging adapter - `measure`, `measure_cached`, `ftwa_cached`,
-//! `measure_cell`, and the per-UI caches - lives in `crate::ui::table_width`
-//! and re-exports the pure API via `pub use`.
+//! The framework-bridging adapter - the text measurer, the per-UI caches and the
+//! layout solver entry point - lives in `crate::ui_iced::table_width`
+//! ([`crate::ui_iced::table_width::solve_table_layout`]).
 //!
 //! Unit tests live in the sibling `algorithm_tests.rs` and `internal_tests.rs` sidecars.
 
@@ -29,9 +28,8 @@ pub struct Breakpoint {
 
 /// Table-width algorithm selector. Covers both the original FTWA
 /// "deficit distribution" strategies (which build a minimum-cardinality
-/// wrap set and shrink it) and three additional algorithms from the
-/// survey in `doc/planning/table-column-width-algorithm.md` that operate
-/// on all columns directly (no wrap set).
+/// wrap set and shrink it) and three additional survey algorithms that
+/// operate on all columns directly (no wrap set).
 ///
 /// All strategies preserve the never-break-token invariant
 /// (`w_j >= min_content[j]`) and the §3.6 fallback when the container is
@@ -214,9 +212,8 @@ pub struct ColumnWidths {
 ///
 /// # Examples
 ///
-/// (This function is not part of the public API; the `ui::table_width`
-/// module is intentionally private. See the unit tests in this file
-/// for usage examples covering all three regimes.)
+/// (See the `algorithm_tests.rs` and `internal_tests.rs` sidecars for
+/// usage examples covering all three regimes.)
 pub fn ftwa(
     max_content: &[f32],
     min_content: &[f32],
@@ -253,7 +250,7 @@ pub fn ftwa(
     // NaN propagates silently through every arithmetic comparison (they
     // all return false against NaN), causing the function to fall through
     // to the deficit branch with NaN sum_max / deficit, eventually
-    // returning NaN-containing widths that crash egui's layout downstream.
+    // returning NaN-containing widths that corrupt layout downstream.
     assert!(
         available.is_finite(),
         "ftwa: available must be finite, got {available}"
@@ -292,9 +289,10 @@ pub fn ftwa(
     // max) silently triggers the §3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
     //
-    // Sub-pixel drift tolerance. egui's `layout_no_wrap` can return
-    // `layout_no_wrap("A" + "B")` slightly different from
-    // `layout_no_wrap("A") + layout_no_wrap("B")` (kerning and
+    // Sub-pixel drift tolerance. Measuring a merged string without
+    // wrapping can return a width slightly different from the sum of
+    // the parts measured separately: `measure("A" + "B")` vs
+    // `measure("A") + measure("B")` (kerning and
     // sub-pixel rounding in the font shaper). The upstream
     // `measure_cell` builds `min_content` from the merged string when
     // no whitespace separates consecutive `InlineElem`s, while
@@ -791,20 +789,41 @@ fn cell_breakpoints(token_widths: &[f32], space_width: f32) -> Vec<Breakpoint> {
 }
 
 /// Simulate greedy left-to-right line packing and return the line count.
-fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> i32 {
+///
+/// A token joins the current line while `line + space + token` still fits;
+/// otherwise the packer starts a new line. Two rules keep the count physical:
+///
+/// * only a line that **already holds a token** may wrap, so a token wider than
+///   `col_width` overflows the single line it sits on instead of being charged
+///   a phantom empty line before it (an unbreakable token is exactly one line);
+/// * a token pays the inter-token space only when the line already holds a
+///   token, so the first token of every line is measured without a leading
+///   space.
+///
+/// An empty token list is defined as one (empty) line so callers can subtract
+/// 1 for an extra-line count without a special case.
+///
+/// This is the single line-counting rule for the whole table subsystem: the row
+/// heights in [`crate::markdown::table_layout`] are measured with it too, so the
+/// wrap-cost curve the solver optimises and the height actually rendered cannot
+/// drift apart.
+pub(crate) fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> i32 {
     if token_widths.is_empty() {
         return 1;
     }
     let mut lines = 1;
     let mut line_w = 0.0;
-    for (i, &tw) in token_widths.iter().enumerate() {
-        let token_w = if i == 0 { tw } else { space_width + tw };
-        if line_w + token_w > col_width + 1e-6 {
-            // Start a new line.
+    let mut line_used = false;
+    for &tw in token_widths {
+        if line_used && line_w + space_width + tw > col_width + 1e-6 {
+            // Start a new line: the token lands on it without a leading space.
             lines += 1;
-            line_w = tw; // First token on new line has no leading space.
+            line_w = tw;
+        } else if line_used {
+            line_w += space_width + tw;
         } else {
-            line_w += token_w;
+            line_w = tw;
+            line_used = true;
         }
     }
     lines

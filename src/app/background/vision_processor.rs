@@ -4,7 +4,7 @@
 
 use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::file::{FileChanged, FileEventProducer};
 use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::AppConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
@@ -177,7 +177,7 @@ pub struct ImageVisionWorker {
     rx: Receiver<PathBuf>,
     tx: BackgroundEventSender,
     config: AppConfig,
-    bus: Bus<FileEvent>,
+    bus: Bus<FileChanged>,
 }
 
 impl ImageVisionWorker {
@@ -185,7 +185,7 @@ impl ImageVisionWorker {
         rx: Receiver<PathBuf>,
         tx: BackgroundEventSender,
         config: AppConfig,
-        bus: Bus<FileEvent>,
+        bus: Bus<FileChanged>,
     ) -> Self {
         Self {
             rx,

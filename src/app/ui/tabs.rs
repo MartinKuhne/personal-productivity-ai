@@ -1,4 +1,6 @@
-//! Open-document tab manager — adding, closing, switching tabs, and tracking loaded markdown content, YAML front matter, and TOC.
+//! Open-document tab manager - adding, closing, switching tabs, and tracking loaded markdown content, YAML front matter, and TOC.
+//!
+//! Unit tests live in the sibling `tabs_tests.rs` sidecar.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -35,8 +37,8 @@ pub struct Tabs {
     pub toc: Vec<ToCEntry>,
     /// Pending scroll target as a stable string id (matches
     /// `ToCEntry::id`). The center panel converts it to an
-    /// `egui::Id` at render time. Stored as a string so the
-    /// manager is egui-independent.
+    /// `Id` at render time. Stored as a string so the
+    /// manager is framework-independent.
     pub scroll_to_header_id: Option<String>,
     /// Pending search jump target query. The center panel scrolls
     /// to the first occurrence of this query within the document,
@@ -74,18 +76,92 @@ impl Tabs {
         }
     }
 
+    /// Opens the tab for `path` unless it is already open.
+    ///
+    /// `tabs_set` is the change detector, and mutations may push into
+    /// [`Tabs::tabs`](Self::tabs) directly without touching it, so a `path`
+    /// **already present in [`Tabs::tabs`](Self::tabs) is treated as open
+    /// even when the shadow set has drifted** — the vector is the authority
+    /// and the set is healed from it. Without that healing, a `CloseTab`
+    /// mutation that left the path in the set (but not the vector) would
+    /// silently block every subsequent re-open of the same file.
+    ///
+    /// Purity: pure — mutates only this manager.
     pub fn open_tab(&mut self, path: PathBuf) {
-        if self.tabs_set.insert(path.clone()) {
-            self.tabs.push(path);
+        if self.tabs.contains(&path) {
+            self.tabs_set.insert(path);
+            return;
+        }
+        self.tabs_set.insert(path.clone());
+        self.tabs.push(path);
+        self.invalidate_tab_strip_cache();
+    }
+
+    /// Closes the tab for `path`. The vector is the authority — a path
+    /// open in [`Tabs::tabs`](Self::tabs) is removed even if the shadow set
+    /// has drifted, and the cache is invalidated only when something
+    /// changed.
+    pub fn close_tab(&mut self, path: &PathBuf) {
+        self.tabs_set.remove(path);
+        let len_before = self.tabs.len();
+        self.tabs.retain(|p| p != path);
+        if self.tabs.len() != len_before {
             self.invalidate_tab_strip_cache();
         }
     }
 
-    pub fn close_tab(&mut self, path: &PathBuf) {
-        if self.tabs_set.remove(path) {
+    /// Closes the tab at `index` (the order in [`Tabs::tabs`]), returning
+    /// the closed path, or `None` when the index is out of range. Keeps the
+    /// shadow set in sync (UI-049: `CloseTab`).
+    #[must_use]
+    pub fn close_tab_at(&mut self, index: usize) -> Option<PathBuf> {
+        if index >= self.tabs.len() {
+            return None;
+        }
+        let closed = self.tabs.remove(index);
+        self.tabs_set.remove(&closed);
+        self.invalidate_tab_strip_cache();
+        Some(closed)
+    }
+
+    /// Closes the tab at `index`'s left, or `None` — every other tab
+    /// (UI-049: `CloseOtherTabs`), keeping the set in sync.
+    #[must_use]
+    pub fn keep_only(&mut self, index: usize) -> Option<PathBuf> {
+        let keep = self.tabs.get(index)?.clone();
+        self.tabs.clear();
+        self.tabs_set.clear();
+        self.tabs.push(keep.clone());
+        self.tabs_set.insert(keep.clone());
+        self.invalidate_tab_strip_cache();
+        Some(keep)
+    }
+
+    /// Closes every one of `paths` that is open, returning whether any tab
+    /// was removed. Keeps the set in sync (UI-049: the file-removal
+    /// close-out in `AppOrchestrator::close_tabs_for_removed_files`).
+    pub fn close_tabs(&mut self, paths: &[PathBuf]) -> bool {
+        let mut closed_any = false;
+        for path in paths {
+            self.tabs_set.remove(path);
+            let len_before = self.tabs.len();
             self.tabs.retain(|p| p != path);
+            closed_any |= self.tabs.len() != len_before;
+        }
+        if closed_any {
             self.invalidate_tab_strip_cache();
         }
+        closed_any
+    }
+
+    /// Closes every tab (UI-049: `CloseAllTabs`), keeping the set in sync.
+    pub fn close_all(&mut self) {
+        if self.tabs.is_empty() && self.tabs_set.is_empty() {
+            return;
+        }
+        self.tabs.clear();
+        self.tabs_set.clear();
+        self.invalidate_tab_strip_cache();
     }
 
     /// Invalidate the tab strip cache so it rebuilds on next frame.
@@ -241,188 +317,5 @@ impl Default for Tabs {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new() {
-        let manager = Tabs::new();
-        assert!(manager.loaded_path.is_none());
-        assert!(manager.current_yaml.is_none());
-        assert_eq!(manager.current_markdown, "");
-        assert!(manager.tabs.is_empty());
-        assert!(manager.toc.is_empty());
-        assert!(manager.scroll_to_header_id.is_none());
-        assert!(manager.scroll_to_search.is_none());
-    }
-
-    #[test]
-    fn test_open_tab() {
-        let mut manager = Tabs::new();
-        let path = PathBuf::from("test.md");
-        manager.open_tab(path.clone());
-        assert!(manager.tabs.contains(&path));
-    }
-
-    #[test]
-    fn test_open_tab_no_duplicates() {
-        let mut manager = Tabs::new();
-        let path = PathBuf::from("test.md");
-        manager.open_tab(path.clone());
-        manager.open_tab(path.clone());
-        assert_eq!(manager.tabs.len(), 1);
-    }
-
-    #[test]
-    fn test_close_tab() {
-        let mut manager = Tabs::new();
-        let path = PathBuf::from("test.md");
-        manager.open_tab(path.clone());
-        manager.close_tab(&path);
-        assert!(!manager.tabs.contains(&path));
-    }
-
-    #[test]
-    fn test_clear_content() {
-        let mut manager = Tabs::new();
-        manager.loaded_path = Some(PathBuf::from("test.md"));
-        manager.current_markdown = "# Test".to_string();
-        manager.clear_content();
-        assert!(manager.loaded_path.is_none());
-        assert_eq!(manager.current_markdown, "");
-    }
-
-    #[test]
-    fn test_toc_entry_id_is_stable_string() {
-        // The manager itself never touches egui::Id. Verify
-        // the contract: ToCEntry.id is a plain String.
-        let e = ToCEntry::new("Intro", 1, "Intro");
-        assert_eq!(e.id, "Intro");
-        assert_eq!(e.title, "Intro");
-        assert_eq!(e.level, 1);
-
-        // The second occurrence gets a unique id.
-        let dup = ToCEntry::new("Intro", 1, "Intro#1");
-        assert_ne!(e.id, dup.id);
-    }
-
-    #[test]
-    fn test_scroll_to_header_id_is_optional_string() {
-        // Confirm the field is an egui-free Option<String>.
-        let mut m = Tabs::new();
-        assert_eq!(m.scroll_to_header_id, None);
-        m.scroll_to_header_id = Some("Intro".to_string());
-        assert_eq!(m.scroll_to_header_id.as_deref(), Some("Intro"));
-        m.scroll_to_header_id = None;
-        assert_eq!(m.scroll_to_header_id, None);
-    }
-
-    #[test]
-    fn test_close_tab_missing_path_is_noop() {
-        // Closing a tab that was never opened must be a silent no-op
-        // (no panic, no spurious removal of other tabs).
-        let mut manager = Tabs::new();
-        let open = PathBuf::from("a.md");
-        manager.open_tab(open.clone());
-        manager.close_tab(&PathBuf::from("never-opened.md"));
-        assert_eq!(manager.tabs.len(), 1);
-        assert!(manager.tabs.contains(&open));
-    }
-
-    #[test]
-    fn test_tab_titles_path_without_file_name_uses_empty() {
-        // A path with no file name (e.g. a root "/") falls back to an
-        // empty title via `unwrap_or_default`.
-        let mut manager = Tabs::new();
-        manager.open_tab(PathBuf::from("/"));
-        let titles = manager.tab_titles().to_vec();
-        assert_eq!(titles.len(), 1);
-        assert_eq!(titles[0], "");
-    }
-
-    #[test]
-    fn test_tab_titles_mixed_and_cached() {
-        let mut manager = Tabs::new();
-        manager.open_tab(PathBuf::from("/"));
-        manager.open_tab(PathBuf::from("dir/notes.md"));
-        let titles = manager.tab_titles().to_vec();
-        assert_eq!(titles, vec!["".to_string(), "notes.md".to_string()]);
-
-        // A second call returns the cached slice with the same values.
-        let again = manager.tab_titles().to_vec();
-        assert_eq!(titles, again);
-    }
-
-    #[test]
-    fn test_clear_content_invalidates_heading_ids_cache() {
-        let mut manager = Tabs::new();
-        manager.current_markdown = "# Intro\n\n# Intro\n\n# Body".to_string();
-        let first = manager.heading_ids().to_vec();
-        assert_eq!(first.len(), 3);
-        assert_eq!(first[1], "Intro#1");
-
-        // clear_content resets the markdown and invalidates the cache.
-        manager.clear_content();
-        assert!(manager.heading_ids().is_empty());
-    }
-
-    #[test]
-    fn test_tab_strip_reuses_arc_until_tabs_change() {
-        let mut manager = Tabs::new();
-        manager.open_tab(PathBuf::from("a.md"));
-        manager.open_tab(PathBuf::from("dir/b.md"));
-
-        let (paths, titles) = manager.tab_strip();
-        assert_eq!(paths.as_slice(), &manager.tabs);
-        assert_eq!(titles.as_slice(), ["a.md".to_string(), "b.md".to_string()]);
-
-        // A second call returns the *same* Arc allocations (pointer bump).
-        let (paths2, titles2) = manager.tab_strip();
-        assert!(Arc::ptr_eq(&paths, &paths2));
-        assert!(Arc::ptr_eq(&titles, &titles2));
-
-        // Mutating `tabs` directly (bypassing invalidation) rebuilds.
-        manager.tabs.push(PathBuf::from("c.md"));
-        let (paths3, _) = manager.tab_strip();
-        assert!(!Arc::ptr_eq(&paths, &paths3));
-        assert_eq!(paths3.len(), 3);
-    }
-
-    #[test]
-    fn test_heading_ids_arc_reuses_arc_until_content_changes() {
-        let mut manager = Tabs::new();
-        manager.current_markdown = "# Intro".to_string();
-        let first = manager.heading_ids_arc();
-        assert_eq!(first.as_slice(), ["Intro".to_string()]);
-
-        let second = manager.heading_ids_arc();
-        assert!(
-            Arc::ptr_eq(&first, &second),
-            "unchanged content must reuse the Arc allocation"
-        );
-
-        manager.current_markdown = "# Intro\n\n# Two".to_string();
-        let third = manager.heading_ids_arc();
-        assert!(!Arc::ptr_eq(&first, &third));
-        assert_eq!(third.len(), 2);
-    }
-
-    #[test]
-    fn test_toc_arc_reuses_arc_until_toc_changes() {
-        let mut manager = Tabs::new();
-        manager.toc = vec![ToCEntry::new("Intro", 1, "Intro")];
-        let first = manager.toc_arc();
-        assert_eq!(first.len(), 1);
-
-        let second = manager.toc_arc();
-        assert!(
-            Arc::ptr_eq(&first, &second),
-            "unchanged ToC must reuse the Arc allocation"
-        );
-
-        manager.toc.push(ToCEntry::new("Body", 1, "Body"));
-        let third = manager.toc_arc();
-        assert!(!Arc::ptr_eq(&first, &third));
-        assert_eq!(third.len(), 2);
-    }
-}
+#[path = "tabs_tests.rs"]
+mod tests;

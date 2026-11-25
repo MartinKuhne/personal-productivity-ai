@@ -1,7 +1,7 @@
-//! Shared utility functions for markdown parsing, path validation, and tag extraction.
+//! Shared utility functions for application helpers: icons, clock, path
+//! validation and recycle-bin access.
 
+pub mod app_icon;
 pub mod clock;
-#[cfg(test)]
-mod markdown;
 pub mod path;
 pub mod recycle_bin;

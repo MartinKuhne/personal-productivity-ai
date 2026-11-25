@@ -137,6 +137,10 @@ impl From<crate::tools::dtos::AddressInput> for StructuredAddress {
 /// continuations of the previous property). The value is unescaped per
 /// RFC 2426 §4 (`\\` → `\`, `\n`/`\N` → newline).
 ///
+/// A line without a colon is not a property line, so it is skipped and the scan
+/// continues — a `UID` further down the body is still found (same handling as
+/// [`parse_vcard_properties`]).
+///
 /// Returns `None` if the body has no UID property, in which case the
 /// caller should generate a fresh one. vCard 3.0 doesn't strictly require
 /// a UID but CardDAV servers reject resources without one, so missing
@@ -144,8 +148,10 @@ impl From<crate::tools::dtos::AddressInput> for StructuredAddress {
 pub(super) fn extract_vcard_uid(body: &str) -> Option<String> {
     let unfolded = unfold_vcard(body);
     for line in unfolded.lines() {
-        let (prop, value) = line.split_once(':')?;
-        let prop_name = prop.split(';').next()?.trim();
+        let Some((prop, value)) = line.split_once(':') else {
+            continue;
+        };
+        let prop_name = prop.split(';').next().unwrap_or("").trim();
         if prop_name == "UID" {
             return Some(unescape_vcard_text(value.trim()));
         }

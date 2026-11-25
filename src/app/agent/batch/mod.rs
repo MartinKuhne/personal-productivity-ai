@@ -1,7 +1,7 @@
 //! Batch-processing subsystem — coordinator, discoverer, executor, file matcher, prompts, prompt rules, and types.
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (BATCH-001..BATCH-014) for the full specification.
-//! The batch dialog UI is egui presentation code and lives in [`crate::ui::batch_dialog`].
+//! The batch dialog UI lives in the iced layer ([`crate::ui_iced::batch_dialog`]).
 
 pub(crate) mod coordinator;
 pub(crate) mod discoverer;

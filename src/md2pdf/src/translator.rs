@@ -3,18 +3,18 @@
 //! This module turns a CommonMark / GFM source string into a Typst source
 //! string suitable for compilation by `typst-as-lib`. It is a fresh,
 //! self-contained translator that walks [`pulldown_cmark`] events
-//! directly, paralleling (but not reusing) the egui-shaped event
+//! directly, paralleling (but not reusing) the legacy-shaped event
 //! stream produced by [`crate::markdown::parser::parse_markdown_to_events`].
 //!
 //! # Why a separate translator?
 //!
 //! The existing `RenderEvent` AST in [`crate::markdown::parser`] is
-//! egui-shaped — it carries font, colour, and pixel-space metadata
+//! legacy-shaped — it carries font, colour, and pixel-space metadata
 //! that has no analogue in Typst. Forcing the renderer through that
 //! AST would mean re-introducing a parallel "typst-shaped" projection
-//! every time the egui one changes. A dedicated pulldown-cmark walker
+//! every time the legacy one changes. A dedicated pulldown-cmark walker
 //! keeps the typst output stable, lives in the markdown subsystem
-//! (egui-free by AGENTS.md RUST-058 contract), and is small enough to
+//! (framework-free by AGENTS.md RUST-058 contract), and is small enough to
 //! be audit-friendly.
 //!
 //! # Design
@@ -51,7 +51,7 @@
 //!
 //! Unit tests live in the sibling `typst_tests.rs` sidecar.
 
-// AGENTS.md RUST-058: this module is egui-free — no `use eframe`, `use egui`.
+// AGENTS.md RUST-058: this module is framework-free — no UI-framework imports.
 // AGENTS.md RUST-051: this module lives in the markdown subsystem;
 // pulldown-cmark is imported here and nowhere else in the app layer.
 

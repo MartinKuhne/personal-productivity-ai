@@ -131,7 +131,7 @@ fn greedy_line_count_two_lines() {
     assert_eq!(greedy_line_count(&tokens, 10.0, 70.0), 2);
 }
 
-/// US1 (TBL-009): wrapping must break at whitespace (between tokens),
+/// Wrapping must break at whitespace (between tokens),
 /// never inside a token. `greedy_line_count` only advances a line at the
 /// inter-token boundary check (`line_w + token_w > col_width`), so every
 /// line break falls on a whitespace position. With tokens `[20, 30, 25]`
@@ -759,4 +759,928 @@ fn empty_input_returns_empty_widths_for_survey_algorithms() {
         assert!(d.widths.is_empty());
         assert!(!d.needs_horizontal_scroll);
     }
+}
+
+// -------------------------------------------------------------------
+//  ShrinkStep heap ordering
+// -------------------------------------------------------------------
+
+/// Helper: build a `ShrinkStep` for ordering assertions.
+fn step(cost: f32, col: usize, target_width: f32, delta_lines: i32) -> ShrinkStep {
+    ShrinkStep {
+        cost,
+        col,
+        target_width,
+        delta_lines,
+    }
+}
+
+/// The water-fill heap is ordered by marginal cost first and column index
+/// second, so the same input always pops the same column. `target_width`
+/// and `delta_lines` are payload and must not influence the order.
+#[test]
+fn shrink_step_orders_by_cost_then_column() {
+    let cases: Vec<(ShrinkStep, ShrinkStep, std::cmp::Ordering, &str)> = vec![
+        (
+            step(1.0, 0, 10.0, 1),
+            step(2.0, 3, 10.0, 1),
+            std::cmp::Ordering::Less,
+            "cheaper cost sorts before costlier cost",
+        ),
+        (
+            step(2.0, 3, 10.0, 1),
+            step(1.0, 0, 10.0, 1),
+            std::cmp::Ordering::Greater,
+            "costlier cost sorts after cheaper cost",
+        ),
+        (
+            step(1.0, 2, 10.0, 1),
+            step(1.0, 5, 10.0, 1),
+            std::cmp::Ordering::Less,
+            "equal cost: lower column index sorts first",
+        ),
+        (
+            step(1.0, 4, 10.0, 1),
+            step(1.0, 4, 10.0, 1),
+            std::cmp::Ordering::Equal,
+            "identical steps compare equal",
+        ),
+        (
+            step(1.0, 1, 999.0, 7),
+            step(1.0, 1, 1.0, 0),
+            std::cmp::Ordering::Equal,
+            "target_width and delta_lines are not part of the order",
+        ),
+    ];
+    for (a, b, expected, case) in cases {
+        assert_eq!(a.cmp(&b), expected, "Ord::cmp — {case}");
+        assert_eq!(
+            a.partial_cmp(&b),
+            Some(expected),
+            "PartialOrd::partial_cmp — {case}"
+        );
+    }
+}
+
+/// A NaN cost has no meaningful ordering; the implementation must degrade to
+/// `Equal` on the cost so the column index decides, instead of letting an
+/// arbitrary NaN comparison result propagate through the heap.
+#[test]
+fn shrink_step_nan_cost_compares_equal_and_falls_back_to_column() {
+    let nan = f32::NAN;
+    assert_eq!(
+        step(nan, 0, 10.0, 1).cmp(&step(1.0, 0, 10.0, 1)),
+        std::cmp::Ordering::Equal,
+        "NaN vs finite cost must compare Equal on the cost key"
+    );
+    assert_eq!(
+        step(nan, 0, 10.0, 1).cmp(&step(nan, 2, 10.0, 1)),
+        std::cmp::Ordering::Less,
+        "NaN vs NaN must fall through to the column tie-break"
+    );
+    assert_eq!(
+        step(1.0, 3, 10.0, 1).partial_cmp(&step(nan, 3, 10.0, 1)),
+        Some(std::cmp::Ordering::Equal),
+        "partial_cmp must never return None for a NaN cost"
+    );
+}
+
+/// `BinaryHeap<Reverse<ShrinkStep>>` is the min-heap the water-fill relies on:
+/// the cheapest step pops first, ties are resolved by lower column index.
+#[test]
+fn shrink_step_heap_pops_cheapest_first() {
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<ShrinkStep>> =
+        std::collections::BinaryHeap::new();
+    heap.push(std::cmp::Reverse(step(3.0, 0, 90.0, 1)));
+    heap.push(std::cmp::Reverse(step(1.0, 2, 95.0, 1)));
+    heap.push(std::cmp::Reverse(step(1.0, 1, 97.0, 1)));
+
+    let popped: Vec<usize> = (0..3)
+        .map(|_| heap.pop().expect("heap must still contain an entry").0.col)
+        .collect();
+    assert_eq!(
+        popped,
+        vec![1, 2, 0],
+        "cheapest cost first, then lower column index on a tie"
+    );
+}
+
+// -------------------------------------------------------------------
+//  next_breakpoint_below / greedy_line_count / compute_column_breakpoints
+// -------------------------------------------------------------------
+
+/// A breakpoint at (or above) the threshold is not "below" it and must be
+/// skipped; the scan continues downward to the next strictly-lower entry.
+#[test]
+fn next_breakpoint_below_skips_breakpoints_at_or_above_threshold() {
+    let bps = vec![
+        Breakpoint {
+            width: 10.0,
+            extra_lines: 3,
+        },
+        Breakpoint {
+            width: 30.0,
+            extra_lines: 2,
+        },
+        Breakpoint {
+            width: 60.0,
+            extra_lines: 1,
+        },
+    ];
+    let mut idx = bps.len() - 1; // points at width 60.0
+    let got = next_breakpoint_below(&bps, &mut idx, 60.0).expect("30.0 is strictly below 60.0");
+    assert_eq!(
+        (got.width, got.extra_lines),
+        (30.0, 2),
+        "the breakpoint equal to the threshold must be skipped"
+    );
+    assert_eq!(
+        idx, 0,
+        "the cursor must be left below the returned breakpoint"
+    );
+}
+
+#[test]
+fn next_breakpoint_below_empty_list_returns_none() {
+    let mut idx = 0;
+    assert_eq!(
+        next_breakpoint_below(&[], &mut idx, 100.0),
+        None,
+        "an empty breakpoint list has nothing to return"
+    );
+    assert_eq!(idx, 0, "the cursor must be untouched for an empty list");
+}
+
+/// An empty token list is defined as a single (empty) line, so callers can
+/// subtract 1 to get the extra-line count without a special case.
+#[test]
+fn greedy_line_count_empty_tokens_is_one_line() {
+    assert_eq!(greedy_line_count(&[], 10.0, 0.0), 1);
+    assert_eq!(greedy_line_count(&[], 10.0, 100.0), 1);
+}
+
+/// **Regression test for the `greedy_line_count` off-by-one (defect D6).**
+///
+/// The packer used to take its "start a new line" branch for the *first* token
+/// even though the current line was still empty, so an over-wide first token was
+/// charged a phantom empty line and the count came out one too high. A single
+/// unbreakable token physically occupies exactly **one** line (it overflows the
+/// column), and that is what the packer reports now.
+///
+/// The defect was masked on the main FTWA path, where
+/// `col_width >= min_content >= longest token` guarantees the first token fits,
+/// but *not* inside [`cell_breakpoints`], whose candidate list contains
+/// single-token widths smaller than the first token.
+#[test]
+fn first_token_wider_than_column_costs_exactly_one_line() {
+    assert_eq!(
+        greedy_line_count(&[200.0], 10.0, 50.0),
+        1,
+        "a single over-wide token overflows its own line and must cost 1 line, \
+         not a phantom empty line plus the token"
+    );
+    assert_eq!(
+        greedy_line_count(&[200.0, 10.0], 10.0, 50.0),
+        2,
+        "the over-wide first token takes line 1 and the next token line 2"
+    );
+    assert_eq!(
+        greedy_line_count(&[200.0, 100.0, 100.0], 10.0, 50.0),
+        3,
+        "one over-wide token plus two tokens that cannot share a line with it \
+         or with each other is three lines"
+    );
+    assert_eq!(
+        greedy_line_count(&[50.0], 10.0, 50.0),
+        1,
+        "a first token that exactly fits was never affected and stays 1 line"
+    );
+    assert_eq!(
+        greedy_line_count(&[50.0, 50.0], 10.0, 50.0),
+        2,
+        "in-contract packing is unchanged: two 50-wide tokens never share a 50-wide column"
+    );
+    assert_eq!(
+        greedy_line_count(&[], 10.0, 0.0),
+        1,
+        "an empty token list is defined as one empty line"
+    );
+    assert_eq!(
+        greedy_line_count(&[], 10.0, 100.0),
+        1,
+        "an empty token list is one line regardless of column width"
+    );
+}
+
+/// An over-wide token **mid-run** already landed on a non-empty line, so it was
+/// never charged the phantom line; this pins that the fix did not disturb the
+/// Regression test for defect 06 (fixed).
+/// already-correct mid-run packing.
+#[test]
+fn over_wide_token_mid_run_packs_one_token_per_line() {
+    assert_eq!(
+        greedy_line_count(&[10.0, 200.0, 10.0], 10.0, 50.0),
+        3,
+        "the over-wide middle token gets its own line between the two small ones"
+    );
+    assert_eq!(
+        greedy_line_count(&[10.0, 200.0, 10.0, 10.0], 10.0, 50.0),
+        3,
+        "after the over-wide middle token the two trailing 10-wide tokens still \
+         share one line: 10+10+10 = 30 <= 50"
+    );
+    assert_eq!(
+        greedy_line_count(&[200.0, 200.0], 10.0, 50.0),
+        2,
+        "two over-wide tokens occupy exactly two lines, not three"
+    );
+}
+
+/// The wrap-cost curve [`cell_breakpoints`] publishes is what the FTWA solvers
+/// read, and it is built from candidate widths that include single tokens —
+/// i.e. widths *below* an over-wide first token. That is where the phantom line
+/// used to show up: the curve claimed a cell needed more extra lines than it
+/// physically does, and claimed a *narrower* width cost *more* extra lines than
+/// Regression test for defect 06 (fixed).
+/// a wider one in a way that broke the curve's monotonicity.
+#[test]
+fn cell_breakpoints_curve_is_monotone_for_an_over_wide_first_token() {
+    // `[200, 10]` with a 10-wide space needs 2 lines below 220 and 1 line at
+    // or above it, so exactly one transition exists.
+    let bps = cell_breakpoints(&[200.0, 10.0], 10.0);
+    assert_eq!(
+        bps.len(),
+        1,
+        "only the real 1→2 line transition may appear, got: {bps:?}"
+    );
+    assert!(
+        (bps[0].width - 220.0).abs() < 1e-3,
+        "the transition sits at the width where both tokens fit on one line, got: {bps:?}"
+    );
+    assert_eq!(
+        bps[0].extra_lines, 1,
+        "wrapping `[200, 10]` onto two lines is one extra line, got: {bps:?}"
+    );
+
+    // General invariant on a cell with two transitions: as width grows,
+    // extra_lines must fall — never rise.
+    let two_steps = cell_breakpoints(&[200.0, 20.0, 20.0], 10.0);
+    assert!(
+        two_steps.len() >= 2,
+        "a cell that wraps once at 230 and twice at 260 must publish two steps, \
+         got: {two_steps:?}"
+    );
+    for window in two_steps.windows(2) {
+        assert!(
+            window[0].width < window[1].width && window[0].extra_lines > window[1].extra_lines,
+            "a wider column can never cost more extra lines: {two_steps:?}"
+        );
+    }
+}
+
+/// A column-level curve merges several cells, so the phantom line used to be
+/// summed across every cell whose first token was over-wide. With the fix, a
+/// Regression test for defect 06 (fixed).
+/// column of two identical over-wide cells reports one extra line, not two.
+#[test]
+fn column_curve_does_not_inflate_over_wide_cells() {
+    let cells = vec![
+        CellTokens {
+            token_widths: vec![200.0, 10.0],
+        },
+        CellTokens {
+            token_widths: vec![200.0, 10.0],
+        },
+    ];
+    let bps = compute_column_breakpoints(&cells, 10.0);
+    assert_eq!(
+        bps.len(),
+        1,
+        "both cells transition at the same width, got: {bps:?}"
+    );
+    assert_eq!(
+        bps[0].extra_lines, 2,
+        "two cells each wrapping once contribute 2 extra lines in total, got: {bps:?}"
+    );
+}
+
+#[test]
+fn compute_column_breakpoints_empty_cell_list() {
+    assert!(
+        compute_column_breakpoints(&[], 10.0).is_empty(),
+        "a column with no cells has no wrap-cost curve"
+    );
+}
+
+/// Single-token cells never wrap, so they contribute no breakpoints and the
+/// merged column curve stays empty.
+#[test]
+fn compute_column_breakpoints_for_non_wrapping_cells() {
+    let cells = vec![
+        CellTokens {
+            token_widths: vec![40.0],
+        },
+        CellTokens {
+            token_widths: vec![55.0],
+        },
+    ];
+    assert!(
+        compute_column_breakpoints(&cells, 10.0).is_empty(),
+        "cells without wrap candidates must not synthesise breakpoints"
+    );
+}
+
+/// Cells whose breakpoints land on *different* widths produce one merged
+/// entry per distinct width, each carrying the sum of the per-cell extra
+/// lines that are active at that width.
+///
+/// Note the narrow-side lookup: `extra_lines_at_width` reports the cost of
+/// the widest breakpoint at or below the queried width, so the value at a
+/// breakpoint's own width is the cost that greedy packing only reaches
+/// *below* it (see the report's spec-drift note).
+#[test]
+fn compute_column_breakpoints_sums_lines_at_distinct_widths() {
+    let cells = vec![
+        // Breakpoint: width 70 → +1 line.
+        CellTokens {
+            token_widths: vec![30.0, 30.0],
+        },
+        // Breakpoints: width 50 → +2 lines, width 80 → +1 line.
+        CellTokens {
+            token_widths: vec![20.0, 20.0, 20.0],
+        },
+    ];
+    let bps = compute_column_breakpoints(&cells, 10.0);
+    let expected = [
+        Breakpoint {
+            width: 50.0,
+            extra_lines: 2,
+        },
+        Breakpoint {
+            width: 70.0,
+            extra_lines: 3,
+        },
+        Breakpoint {
+            width: 80.0,
+            extra_lines: 2,
+        },
+    ];
+    assert_eq!(bps.len(), expected.len(), "one entry per distinct width");
+    for (got, want) in bps.iter().zip(expected.iter()) {
+        assert!(
+            (got.width - want.width).abs() < 1e-3,
+            "width {} != expected {}",
+            got.width,
+            want.width
+        );
+        assert_eq!(
+            got.extra_lines, want.extra_lines,
+            "summed extra_lines at width {}",
+            want.width
+        );
+    }
+}
+
+// -------------------------------------------------------------------
+//  B2 helpers: defensive guards
+// -------------------------------------------------------------------
+
+/// The `acc == 0` guard prevents a division by zero. Through `ftwa` it cannot
+/// trigger (a non-empty wrap set always has positive slack), so the helper is
+/// exercised directly to pin the guard's behaviour.
+#[test]
+fn b2_proportional_to_slack_zero_slack_sum_shrinks_nothing() {
+    let mut widths = [100.0_f32, 80.0];
+    b2_proportional_to_slack(&[0], &mut widths, &[100.0, 80.0], &[10.0, 10.0], 20.0, 0.0);
+    assert_eq!(
+        widths,
+        [100.0, 80.0],
+        "acc = 0 must not divide by zero or shrink the column"
+    );
+}
+
+/// Both early-return guards: an empty wrap set and a non-positive deficit
+/// leave the widths untouched.
+#[test]
+fn b2_breakpoint_water_fill_noops_on_empty_inputs() {
+    let max = [100.0_f32];
+    let min = [50.0_f32];
+    let bps = vec![vec![Breakpoint {
+        width: 60.0,
+        extra_lines: 1,
+    }]];
+
+    let mut widths = [100.0_f32];
+    b2_breakpoint_water_fill(&[], &mut widths, &max, &min, &bps, 30.0);
+    assert_eq!(widths, [100.0], "empty wrap set must be a no-op");
+
+    let mut widths = [100.0_f32];
+    b2_breakpoint_water_fill(&[0], &mut widths, &max, &min, &bps, 0.0);
+    assert_eq!(widths, [100.0], "zero deficit must be a no-op");
+}
+
+// -------------------------------------------------------------------
+//  Wrap-set saturation overflow guard
+// -------------------------------------------------------------------
+
+/// Wrap-set saturation. The greedy wrap set's combined slack (100) covers the
+/// deficit (90), but the breakpoint curve only lets each column shrink 1 px
+/// before it runs out of breakpoints. B2 stops with Σ widths = 198 ≫ 110, the
+/// drift fix can only clamp the target at `min_content` (it cannot shrink
+/// below it), and the trailing overflow guard must escalate to the §3.6
+/// horizontal-scroll fallback instead of overflowing the viewport.
+///
+/// This path is only reachable through `BreakpointWaterFill`: with
+/// `ProportionalToSlack` the captured slack always covers the deficit, so B2
+/// lands exactly on `available` and the guard can never fire.
+#[test]
+fn ftwa_wrap_set_saturation_escalates_to_horizontal_scroll() {
+    let max = [100.0_f32, 100.0];
+    let min = [50.0_f32, 50.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 99.0,
+            extra_lines: 1,
+        }],
+        vec![Breakpoint {
+            width: 99.0,
+            extra_lines: 1,
+        }],
+    ];
+    let d = ftwa_wf(&max, &min, &bps, 110.0);
+    assert!(
+        d.needs_horizontal_scroll,
+        "a saturated wrap set must escalate to the horizontal-scroll fallback"
+    );
+    assert_eq!(
+        d.widths,
+        vec![50.0, 50.0],
+        "the fallback must return min-content widths"
+    );
+}
+
+// -------------------------------------------------------------------
+//  Lagrange helpers
+// -------------------------------------------------------------------
+
+/// The two ends of the λ range: at λ = 0 the width term vanishes and every
+/// column keeps its widest candidate; at λ → ∞ the width term dominates and
+/// every column drops to `min_j`. In between, a mid-range λ picks the
+/// breakpoint candidate because the wrap penalty outweighs the extra width.
+#[test]
+fn lagrange_optimal_width_extremes_of_lambda() {
+    let max = [100.0_f32];
+    let min = [40.0_f32];
+    let bps = vec![vec![Breakpoint {
+        width: 70.0,
+        extra_lines: 1,
+    }]];
+
+    assert_eq!(
+        lagrange_optimal_width(0.0, 0, &max, &min, &bps),
+        100.0,
+        "λ = 0 must keep the widest candidate"
+    );
+    assert_eq!(
+        lagrange_optimal_width(0.01, 0, &max, &min, &bps),
+        70.0,
+        "λ = 0.01: bp cost 0.7 beats max 1.0 and min 1.4"
+    );
+    assert_eq!(
+        lagrange_optimal_width(0.05, 0, &max, &min, &bps),
+        40.0,
+        "λ = 0.05: min cost 3.0 beats bp 3.5 and max 5.0"
+    );
+    assert_eq!(
+        lagrange_optimal_width(1.0e6, 0, &max, &min, &bps),
+        40.0,
+        "λ → ∞ must drop to min_content"
+    );
+}
+
+/// `lagrange_sum` must agree with the vector produced by `lagrange_widths`,
+/// and every returned width must be one of the in-contract candidates
+/// (`max_j`, a breakpoint width, or `min_j`), i.e. inside `[min_j, max_j]`.
+#[test]
+fn lagrange_sum_matches_widths_vector() {
+    let max = [100.0_f32, 60.0, 30.0];
+    let min = [40.0_f32, 20.0, 30.0];
+    let bps = vec![
+        vec![
+            Breakpoint {
+                width: 50.0,
+                extra_lines: 2,
+            },
+            Breakpoint {
+                width: 70.0,
+                extra_lines: 1,
+            },
+        ],
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        }],
+        Vec::new(),
+    ];
+
+    for &lambda in &[0.0_f32, 0.01, 0.05, 0.1, 1.0, 1.0e6] {
+        let widths = lagrange_widths(lambda, &max, &min, &bps);
+        assert_eq!(widths.len(), max.len(), "λ={lambda}: one width per column");
+        assert_eq!(
+            lagrange_sum(lambda, &max, &min, &bps),
+            widths.iter().sum::<f32>(),
+            "λ={lambda}: the sum helper must agree with the widths vector"
+        );
+        for (j, &w) in widths.iter().enumerate() {
+            assert!(
+                w >= min[j] - 1e-6 && w <= max[j] + 1e-6,
+                "λ={lambda}: width[{j}] = {w} outside [{}, {}]",
+                min[j],
+                max[j]
+            );
+        }
+    }
+}
+
+/// The bisection is only valid because Σ w_j(λ) is monotone non-increasing in
+/// λ (widening costs more as λ grows). This is the documented precondition of
+/// [`solve_lagrange_penalty`]; if it ever breaks the bisection silently
+/// returns a wrong layout.
+#[test]
+fn lagrange_sum_is_monotone_non_increasing_in_lambda() {
+    let max = [100.0_f32, 60.0, 30.0];
+    let min = [40.0_f32, 20.0, 30.0];
+    let bps = vec![
+        vec![
+            Breakpoint {
+                width: 50.0,
+                extra_lines: 2,
+            },
+            Breakpoint {
+                width: 70.0,
+                extra_lines: 1,
+            },
+        ],
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        }],
+        Vec::new(),
+    ];
+
+    let lambdas = [0.0_f32, 0.001, 0.01, 0.05, 0.1, 1.0, 10.0, 1.0e6];
+    let sums: Vec<f32> = lambdas
+        .iter()
+        .map(|&l| lagrange_sum(l, &max, &min, &bps))
+        .collect();
+    for (pair, window) in sums.windows(2).zip(lambdas.windows(2)) {
+        assert!(
+            pair[1] <= pair[0] + 1e-6,
+            "Σ must not grow as λ increases: λ {} → {} gave Σ {} → {}",
+            window[0],
+            window[1],
+            pair[0],
+            pair[1]
+        );
+    }
+    assert!(
+        sums[0] > sums[sums.len() - 1],
+        "the λ range must actually move the total: {sums:?}"
+    );
+}
+
+// -------------------------------------------------------------------
+//  Survey solver input contracts (direct entry points)
+// -------------------------------------------------------------------
+
+/// `solve_waterfill_ratio` ignores `breakpoints` (the ratio objective is
+/// purely geometric), so unlike the Lagrange and hybrid solvers it does not
+/// require a per-column breakpoint list at all.
+#[test]
+fn ratio_solver_ignores_breakpoints() {
+    let d = solve_waterfill_ratio(&[100.0, 100.0], &[50.0, 50.0], &[], 150.0, 200.0, 100.0);
+    assert!(!d.needs_horizontal_scroll, "150 >= sum_min = 100");
+    assert!(
+        (d.widths.iter().sum::<f32>() - 150.0).abs() < 1e-3,
+        "the equal-ratio solution must spend the available width: {:?}",
+        d.widths
+    );
+}
+
+#[test]
+#[should_panic(expected = "solve_lagrange_penalty: breakpoints length mismatch")]
+fn lagrange_solver_rejects_breakpoints_length_mismatch() {
+    solve_lagrange_penalty(&[100.0], &[50.0], &[], 80.0, 100.0, 50.0);
+}
+
+#[test]
+#[should_panic(expected = "solve_hybrid: breakpoints length mismatch")]
+fn hybrid_solver_rejects_breakpoints_length_mismatch() {
+    solve_hybrid(&[100.0], &[50.0], &[], 80.0, 100.0, 50.0);
+}
+
+#[test]
+#[should_panic(expected = "solve_waterfill_ratio: length mismatch")]
+fn ratio_solver_rejects_min_max_length_mismatch() {
+    solve_waterfill_ratio(&[100.0, 100.0], &[50.0], &[], 80.0, 200.0, 100.0);
+}
+
+#[test]
+#[should_panic(expected = "solve_waterfill_ratio: available must be finite and non-negative")]
+fn ratio_solver_rejects_negative_available() {
+    solve_waterfill_ratio(&[10.0], &[5.0], &[], -1.0, 10.0, 5.0);
+}
+
+#[test]
+#[should_panic(expected = "solve_lagrange_penalty: available must be finite and non-negative")]
+fn lagrange_solver_rejects_nan_available() {
+    solve_lagrange_penalty(&[10.0], &[5.0], &[Vec::new()], f32::NAN, 10.0, 5.0);
+}
+
+#[test]
+#[should_panic(expected = "solve_hybrid: available must be finite and non-negative")]
+fn hybrid_solver_rejects_infinite_available() {
+    solve_hybrid(&[10.0], &[5.0], &[Vec::new()], f32::INFINITY, 10.0, 5.0);
+}
+// -------------------------------------------------------------------
+//  B2 helpers: partial steps and the min-content safety net
+// -------------------------------------------------------------------
+
+/// A deficit smaller than the cheapest step must be cut short: the column
+/// stops *between* breakpoints, the breakpoint is not counted as crossed, and
+/// no follow-up step is queued for it.
+#[test]
+fn b2_stops_mid_step_when_deficit_is_smaller_than_the_step() {
+    let max = [100.0_f32, 80.0];
+    let min = [40.0_f32, 40.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 3,
+        }],
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        }],
+    ];
+
+    // Column 1 is the cheaper shrink (1 line / 40 px vs 3 lines / 60 px), so
+    // it absorbs the whole 10 px deficit and never reaches its breakpoint.
+    let mut widths = [100.0_f32, 80.0];
+    b2_breakpoint_water_fill(&[0, 1], &mut widths, &max, &min, &bps, 10.0);
+
+    assert_eq!(
+        widths,
+        [100.0, 70.0],
+        "a 10 px deficit must stop column 1 mid-step at 70 px"
+    );
+}
+
+/// A deficit larger than one step must cross the breakpoint, bank its extra
+/// lines, queue the next cheaper step for the same column, and then spend
+/// whatever is left on the next column.
+#[test]
+fn b2_crosses_a_breakpoint_and_queues_the_next_step_for_the_same_column() {
+    let max = [100.0_f32, 80.0];
+    let min = [40.0_f32, 40.0];
+    // Breakpoints are stored ascending; B2 consumes them from the highest
+    // width downwards, so column 1 steps 80 -> 60 -> 40.
+    let bps = vec![
+        vec![Breakpoint {
+            width: 50.0,
+            extra_lines: 8,
+        }],
+        vec![
+            Breakpoint {
+                width: 40.0,
+                extra_lines: 3,
+            },
+            Breakpoint {
+                width: 60.0,
+                extra_lines: 1,
+            },
+        ],
+    ];
+
+    // 30 px: 20 px take column 1 across its 60 px breakpoint, the remaining
+    // 10 px continue down the same column's next (still cheaper) step.
+    let mut widths = [100.0_f32, 80.0];
+    b2_breakpoint_water_fill(&[0, 1], &mut widths, &max, &min, &bps, 30.0);
+
+    assert_eq!(
+        widths,
+        [100.0, 50.0],
+        "column 1 must cross 60 px and then absorb the residual down to 50 px"
+    );
+    assert!(
+        widths[1] >= min[1],
+        "column 1 dropped below its min-content: {widths:?}"
+    );
+}
+
+/// The trailing clamp is a safety net: if a column ever ends up below its
+/// min-content (an exhausted heap cannot shrink it back), it is lifted back
+/// to the floor rather than breaking the never-break-token invariant.
+#[test]
+fn b2_lifts_a_column_back_to_min_content_when_the_heap_is_exhausted() {
+    let max = [100.0_f32];
+    let min = [50.0_f32];
+    // No breakpoints at all -> the heap is empty and the loop breaks at once.
+    let bps: Vec<Vec<Breakpoint>> = vec![Vec::new()];
+
+    let mut widths = [20.0_f32];
+    b2_breakpoint_water_fill(&[0], &mut widths, &max, &min, &bps, 10.0);
+
+    assert_eq!(
+        widths,
+        [50.0],
+        "an exhausted heap must not leave the column below min-content"
+    );
+}
+
+// -------------------------------------------------------------------
+//  WaterFillRatio: zero min-content columns
+// -------------------------------------------------------------------
+
+/// An empty cell has a min-content of zero, so the equal-ratio target can
+/// never fall below its floor and it is never clamped out of the active set.
+/// It keeps its share of the surplus and takes the sub-pixel residual.
+#[test]
+fn waterfill_ratio_never_clamps_a_zero_min_content_column() {
+    let max = [100.0_f32, 200.0, 100.0];
+    let min = [60.0_f32, 0.0, 60.0];
+    let bps: Vec<Vec<Breakpoint>> = vec![Vec::new(); 3];
+    let available = 181.0_f32;
+
+    let d = ftwa_ratio(&max, &min, &bps, available);
+
+    assert!(
+        !d.needs_horizontal_scroll,
+        "181 px covers the 120 px of min-content, so no scroll is needed"
+    );
+    assert_eq!(d.widths.len(), 3, "one width per column");
+    for (j, (&w, &m)) in d.widths.iter().zip(min.iter()).enumerate() {
+        assert!(w.is_finite(), "column {j} width {w} is not finite");
+        assert!(
+            w >= m - 1e-3,
+            "column {j} width {w} fell below its min-content {m}: {:?}",
+            d.widths
+        );
+    }
+    assert!(
+        d.widths[1] > 0.0,
+        "the zero-min column is starved even though width is left over: {:?}",
+        d.widths
+    );
+    assert!(
+        d.widths[1] >= d.widths[0],
+        "the unclamped column must end up at least as wide as a clamped one: {:?}",
+        d.widths
+    );
+    assert!(
+        (d.widths.iter().sum::<f32>() - available).abs() < 1e-2,
+        "widths {:?} do not fill {available}: {:?}",
+        d.widths.iter().sum::<f32>(),
+        d.widths
+    );
+}
+
+/// The Lagrangian tie-break prefers the **wider** candidate when two candidates
+/// cost the same. Both sub-branches are defensive: they can only fire when a
+/// candidate width sits outside `[min_j, max_j]`, which the solver contract
+/// rules out. Pinned so a refactor cannot silently invert the rule.
+#[test]
+fn lagrange_optimal_width_tie_breaks_toward_the_wider_candidate() {
+    // At λ = 0 the max candidate costs 0, and the highest breakpoint's wide-side
+    // wrap cost is 0 too — so a breakpoint wider than max_content ties and wins.
+    let max = [100.0_f32];
+    let min = [40.0_f32];
+    let bps = vec![vec![Breakpoint {
+        width: 150.0,
+        extra_lines: 1,
+    }]];
+    assert_eq!(
+        lagrange_optimal_width(0.0, 0, &max, &min, &bps),
+        150.0,
+        "an equal-cost breakpoint wider than max_content must win the tie-break"
+    );
+
+    // With no breakpoints and min_content above max_content (an out-of-contract
+    // input this pure helper does not assert on), the min candidate ties at zero
+    // cost and wins for being the wider of the two.
+    let inverted_max = [100.0_f32];
+    let inverted_min = [200.0_f32];
+    let no_bps: Vec<Vec<Breakpoint>> = vec![Vec::new()];
+    assert_eq!(
+        lagrange_optimal_width(0.0, 0, &inverted_max, &inverted_min, &no_bps),
+        200.0,
+        "an equal-cost min_content candidate must win the tie-break"
+    );
+}
+
+/// `Breakpoint`, `CellTokens` and `ColumnWidths` are cloned into the UI adapter
+/// and diffed against the previous layout, so the derived impls must cover
+/// every field.
+#[test]
+fn breakpoint_cell_tokens_and_column_widths_derived_impls_cover_every_field() {
+    let bp = Breakpoint {
+        width: 80.0,
+        extra_lines: 2,
+    };
+    assert_eq!(bp, bp.clone(), "a cloned breakpoint must compare equal");
+    assert_ne!(
+        bp,
+        Breakpoint {
+            width: 80.0,
+            extra_lines: 3,
+        },
+        "extra_lines is part of a breakpoint's identity"
+    );
+    assert_ne!(
+        bp,
+        Breakpoint {
+            width: 81.0,
+            extra_lines: 2,
+        },
+        "width is part of a breakpoint's identity"
+    );
+    let bp_debug = format!("{bp:?}");
+    assert!(
+        bp_debug.contains("Breakpoint") && bp_debug.contains("80"),
+        "Debug must name the curve step and its width, got: {bp_debug}"
+    );
+
+    let cell = CellTokens {
+        token_widths: vec![30.0, 40.0],
+    };
+    assert_eq!(
+        cell.clone().token_widths,
+        cell.token_widths,
+        "a cloned cell must keep its token widths"
+    );
+
+    let layout = ColumnWidths {
+        widths: vec![10.0, 20.0],
+        needs_horizontal_scroll: true,
+    };
+    assert_eq!(layout, layout.clone(), "a cloned layout must compare equal");
+    assert_ne!(
+        layout,
+        ColumnWidths {
+            widths: vec![10.0, 20.0],
+            needs_horizontal_scroll: false,
+        },
+        "the scroll flag is part of the layout identity"
+    );
+    assert_ne!(
+        layout,
+        ColumnWidths {
+            widths: vec![10.0],
+            needs_horizontal_scroll: true,
+        },
+        "the per-column widths are part of the layout identity"
+    );
+    let layout_debug = format!("{layout:?}");
+    assert!(
+        layout_debug.contains("ColumnWidths") && layout_debug.contains("needs_horizontal_scroll"),
+        "Debug must name the layout and its flag, got: {layout_debug}"
+    );
+}
+
+/// A cell that holds no tokens contributes no curve, so a column of empty cells
+/// has no breakpoints at all — the merge loop must not invent a zero-width step.
+#[test]
+fn compute_column_breakpoints_ignores_cells_without_tokens() {
+    let cells = [
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+    ];
+
+    assert!(
+        compute_column_breakpoints(&cells, 4.0).is_empty(),
+        "empty cells never wrap, so the column has no cost curve"
+    );
+
+    // Mixed with a wrapping cell, only that cell's steps survive.
+    let mixed = [
+        CellTokens {
+            token_widths: Vec::new(),
+        },
+        CellTokens {
+            token_widths: vec![30.0, 30.0],
+        },
+    ];
+    let merged = compute_column_breakpoints(&mixed, 4.0);
+    assert_eq!(
+        merged,
+        vec![Breakpoint {
+            width: 64.0,
+            extra_lines: 1,
+        }],
+        "the empty cell must contribute nothing to the merged curve"
+    );
 }
