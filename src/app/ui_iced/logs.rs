@@ -763,7 +763,8 @@ pub fn logs_controls(view_model: &BackgroundLogsViewModel) -> Row<'_, Message> {
         Message::Logs(LogsMessage::Cleared),
         CLEAR_BUTTON_ID,
     )
-    .palette(Palette::pro());
+    .palette(Palette::pro())
+    .with_tooltip(strings::CLEAR_BUTTON);
 
     Row::with_children(vec![
         search_label.into(),

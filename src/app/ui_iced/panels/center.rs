@@ -1505,7 +1505,8 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
                 agent_session_close_message(),
                 AGENT_SESSION_CLOSE_BUTTON_ID,
             )
-            .palette(Palette::pro()),
+            .palette(Palette::pro())
+            .with_tooltip(strings::AGENT_SESSION_CLOSE_BUTTON),
         )
         .width(Length::Fill)
         .align_right(Length::Shrink)

@@ -459,6 +459,9 @@ pub const FORMAT_MARKDOWN_ACTION: &str = "Format Markdown";
 /// Uses Phosphor [`ICON_STOP`] icon.
 pub const STOP_AGENT_BUTTON: &str = "\u{E46C} Stop";
 
+/// Tooltip for the cancel/stop agent button (`UIF-ATOM-001`, `UIF-NAV-003`).
+pub const STOP_AGENT_TOOLTIP: &str = "Stop agent";
+
 /// Header text for the available models list output.
 pub const MODELS_LIST_HEADER: &str = "Available Models:\n";
 

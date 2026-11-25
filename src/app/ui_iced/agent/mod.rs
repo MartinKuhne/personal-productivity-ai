@@ -151,6 +151,8 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
         close_message(),
         CLOSE_BUTTON_ID,
     )
+    .palette(Palette::pro())
+    .with_tooltip(strings::AGENT_SESSION_CLOSE_BUTTON)
     .compact();
 
     let header = Row::with_children(vec![

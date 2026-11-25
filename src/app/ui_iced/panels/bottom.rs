@@ -434,6 +434,41 @@ pub fn stop_button_variant(running: bool) -> ButtonVariant {
 /// to `CONTROL_SM` (`BODY` line height 20 + 2 × `space.xs`) and the Stop
 /// button takes `.compact()`, so the row satisfies §1's Row Density
 /// Homogeneity rule rather than mixing 28 and 32 in one band.
+///
+/// The Stop control as a framework [`Button`], before it is mounted into the panel.
+///
+/// Carries [`strings::STOP_AGENT_TOOLTIP`] so that if the content measures
+/// under §3.1's icon-only floor (`UIF-ATOM-001` icon-only cell depends on
+/// `UIF-NAV-003`), `Button::outer_size`'s icon-only tooltip requirement is
+/// satisfied.
+///
+/// Split out so a test can read the control's own reported state —
+/// `variant`, `focus_id`, `is_icon_only`, `tooltip_violation` — instead of
+/// digging it back out of an [`Element`], which exposes no such accessors.
+#[must_use]
+pub fn stop_button_widget(view_model: &BottomPanelViewModel) -> Button<'static, Message> {
+    let stop_label = text(strings::STOP_AGENT_BUTTON)
+        .size(STOP_BUTTON_TEXT_SIZE)
+        .line_height(typography::BODY.iced_line_height())
+        .color(stop_button_color(view_model.agent_running));
+
+    let stop_button = Button::new(
+        stop_button_variant(view_model.agent_running),
+        stop_label,
+        Message::Command(UserCommand::CancelAgent),
+        STOP_BUTTON_ID,
+    )
+    .palette(Palette::pro())
+    .with_tooltip(strings::STOP_AGENT_TOOLTIP)
+    .compact();
+
+    if stop_enabled(view_model.agent_running) {
+        stop_button
+    } else {
+        stop_button.disabled()
+    }
+}
+
 #[must_use]
 pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
@@ -467,25 +502,7 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     .compact()
     .palette(Palette::pro());
 
-    let stop_label = text(strings::STOP_AGENT_BUTTON)
-        .size(STOP_BUTTON_TEXT_SIZE)
-        .line_height(typography::BODY.iced_line_height())
-        .color(stop_button_color(view_model.agent_running));
-
-    let stop_button = Button::new(
-        stop_button_variant(view_model.agent_running),
-        stop_label,
-        Message::Command(UserCommand::CancelAgent),
-        STOP_BUTTON_ID,
-    )
-    .palette(Palette::pro())
-    .compact();
-
-    let stop_button: Element<'_, Message> = if stop_enabled(view_model.agent_running) {
-        stop_button.into()
-    } else {
-        stop_button.disabled().into()
-    };
+    let stop_button: Element<'_, Message> = stop_button_widget(view_model).into();
 
     Row::with_children(vec![
         context_group.into(),

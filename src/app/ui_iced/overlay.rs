@@ -351,7 +351,8 @@ where
         confirm,
         CONFIRM_BUTTON_FOCUS_ID,
     )
-    .palette(Palette::pro());
+    .palette(Palette::pro())
+    .with_tooltip(confirm_label);
 
     let cancel_button = Button::new(
         ButtonVariant::Ghost,
@@ -359,7 +360,8 @@ where
         cancel,
         CANCEL_BUTTON_FOCUS_ID,
     )
-    .palette(Palette::pro());
+    .palette(Palette::pro())
+    .with_tooltip(strings::CANCEL_BUTTON);
 
     let confirm_button = if confirm_enabled {
         confirm_button

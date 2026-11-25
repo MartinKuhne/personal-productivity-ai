@@ -239,6 +239,7 @@ fn test_ui_strings_use_phosphor_icons() {
         !STOP_AGENT_BUTTON.contains('⏹'),
         "STOP_AGENT_BUTTON should not use raw stop emoji"
     );
+    assert_eq!(STOP_AGENT_TOOLTIP, "Stop agent");
 
     assert!(
         AGENT_SESSION_HEADER.contains(ICON_ROBOT),

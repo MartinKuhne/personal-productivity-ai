@@ -962,7 +962,8 @@ pub fn agent_debug_controls(view_model: &AgentDebugViewModel) -> Row<'_, Message
         clear_command(),
         AGENT_DEBUG_CLEAR_BUTTON_ID,
     )
-    .palette(Palette::pro());
+    .palette(Palette::pro())
+    .with_tooltip(strings::CLEAR_BUTTON);
 
     Row::with_children(vec![
         search_label.into(),

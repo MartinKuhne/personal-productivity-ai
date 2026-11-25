@@ -558,6 +558,57 @@ fn band_controls_have_stable_ids() {
     assert_ne!(COMMAND_INPUT_ID, STOP_BUTTON_ID, "one id, one live widget");
 }
 
+/// The Stop button's content can measure under §3.1's icon-only floor (e.g.
+/// when PUA icon glyphs are unmapped or text metrics are narrow), so
+/// `UIF-ATOM-001`'s icon-only cell requires it to carry a tooltip. Without
+/// the tooltip, `Button::outer_size`'s `debug_assert!` fires and panics the
+/// app on launch.
+#[test]
+fn the_stop_button_is_icon_only_under_floor_and_carries_its_tooltip() {
+    let idle_vm = BottomPanelViewModel {
+        command_input: command_model(""),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let button = super::stop_button_widget(&idle_vm);
+    let tiny = iced::Size::new(8.0, 16.0);
+
+    assert!(
+        button.is_icon_only(tiny),
+        "a tiny content box measures under the icon-only floor"
+    );
+    assert_eq!(
+        button.tooltip_violation(tiny),
+        None,
+        "an icon-only stop button with no tooltip trips `Button::outer_size`'s debug_assert and \
+         crashes the app on startup"
+    );
+    assert_eq!(
+        button.tooltip_text(),
+        Some(strings::STOP_AGENT_TOOLTIP),
+        "the stop button must carry a tooltip"
+    );
+
+    let running_vm = BottomPanelViewModel {
+        command_input: command_model(""),
+        agent_running: true,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let running_button = super::stop_button_widget(&running_vm);
+    assert_eq!(
+        running_button.tooltip_violation(tiny),
+        None,
+        "an icon-only running stop button must also satisfy the tooltip rule"
+    );
+    assert_eq!(
+        running_button.tooltip_text(),
+        Some(strings::STOP_AGENT_TOOLTIP),
+        "the running stop button must carry a tooltip"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // View builder
 // ---------------------------------------------------------------------------

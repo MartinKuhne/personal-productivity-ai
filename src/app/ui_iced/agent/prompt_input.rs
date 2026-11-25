@@ -120,6 +120,7 @@ fn gated_button(
         message,
         id,
     )
+    .with_tooltip(label)
     .compact();
     if enabled { button } else { button.disabled() }
 }
